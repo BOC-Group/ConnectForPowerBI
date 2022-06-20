@@ -15,5 +15,6 @@ Connect for Power BI allows beginners and experts to create their own dashboards
 * Supported Languages: English
 * Compatibility
   * ADOIT 12.0 or higher
+  * ADONIS 11.0 or higher
   * PowerBI Desktop 2.9 or higher
 * Support: Corrective
