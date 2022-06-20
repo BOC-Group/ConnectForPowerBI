@@ -3,7 +3,7 @@ Templates to connect ADONIS and ADOIT with PowerBI
 
 Connect for Power BI allows beginners and experts to create their own dashboards and work flexibly with ADOIT/ADONIS data.
 
-FOr more information, see our [wiki](https://github.com/BOC-Group/ConnectForPowerBI/wiki)
+For more information, see our [wiki](https://github.com/BOC-Group/ConnectForPowerBI/wiki)
 
 # Features
 * Pre-defined Power BI template to visualize your ADOIT data.
