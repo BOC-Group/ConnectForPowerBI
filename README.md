@@ -1,7 +1,7 @@
 # ConnectForPowerBI
-Templates to connect ADONIS and ADOIT with PowerBI
+Templates to connect ADOIT with PowerBI
 
-Connect for Power BI allows beginners and experts to create their own dashboards and work flexibly with ADOIT/ADONIS data.
+Connect for Power BI allows beginners and experts to create their own dashboards and work flexibly with ADOIT data.
 
 For more information, see our [wiki](https://github.com/BOC-Group/ConnectForPowerBI/wiki)
 
@@ -17,6 +17,5 @@ For more information, see our [wiki](https://github.com/BOC-Group/ConnectForPowe
 * Supported Languages: English
 * Compatibility
   * ADOIT 12.0 or higher
-  * ADONIS 11.0 or higher
   * PowerBI Desktop 2.9 or higher
 * Support: Corrective
