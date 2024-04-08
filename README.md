@@ -1,7 +1,6 @@
 <br/>
 <p align="center">
-  <a href="https://www.boc-group.com"><img src="https://github.com/BOC-Group/ConnectForPowerBI/assets/28571214/f94d5a17-a334-4c95-b83e-2db468126d72" alt="BOC Logo" width="380" height="140"></a>
-  <a href="https://powerbi.microsoft.com/en-us/desktop/"><img src="https://github.com/BOC-Group/ConnectForPowerBI/assets/28571214/35a6fc0b-4bd6-42c0-86d9-f1707c56a542" alt="PowerBI Logo" width="140" height="140"></a>
+  <img src="https://github.com/BOC-Group/ConnectForPowerBI/assets/28571214/8dd02229-6131-433a-a3c4-1d8e04358d89" alt="BOC Logo" width="480" height="300">
   <h3 align="center">ConnectForPowerBI</h3>
 
   <p align="center">
