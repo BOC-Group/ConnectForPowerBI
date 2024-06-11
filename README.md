@@ -29,8 +29,8 @@ For more information, see our [wiki](https://github.com/BOC-Group/ConnectForPowe
 * Connect different objects from ADOIT and synchronize those relations.
 
 # Version Information
-* VERSION: 4.0
-* Release Date: 08.04.2024
+* VERSION: 4.1
+* Release Date: 11.06.2024
 * Supported Languages: Every Language
 * Compatibility
   * ADOIT 15.0 or higher
