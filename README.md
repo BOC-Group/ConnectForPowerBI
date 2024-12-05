@@ -1,15 +1,21 @@
 <br/>
 <p align="center">
-  <img src="https://github.com/BOC-Group/ConnectForPowerBI/assets/28571214/8dd02229-6131-433a-a3c4-1d8e04358d89" alt="BOC Logo" width="480" height="300">
+  <p align="center">
+    <img src="https://github.com/BOC-Group/ConnectForPowerBI/assets/28571214/8dd02229-6131-433a-a3c4-1d8e04358d89" alt="ADOIT Logo" width="45%">
+    ![2021 11 08 - ADONIS Connect for Power BI Thumb](https://github.com/user-attachments/assets/e62dec27-8139-4ef5-826d-63c8d9116081)
+
+  </p>
+  
   <h3 align="center">ConnectForPowerBI</h3>
 
   <p align="center">
-    An Awesome PowerBI Template To Jumpstart Your Projects!
-    <br/>
-    <br/>
-    <a href="https://github.com/BOC-Group/ConnectForPowerBI/wiki/Usage-Example"><strong>Explore the docs »</strong></a>
-    <br/>
-    <br/>
+
+  An Awesome PowerBI Template To Jumpstart Your Projects!
+  <br/>
+  <br/>
+  <a href="https://github.com/BOC-Group/ConnectForPowerBI/wiki/Usage-Example"><strong>Explore the docs »</strong></a>
+  <br/>
+  <br/>
    <img src="https://img.shields.io/github/license/BOC-Group/ConnectForPowerBI" alt="Logo">
   </p>
   
@@ -17,22 +23,23 @@
 
 
 # ConnectForPowerBI
-Templates to connect ADOIT with PowerBI
+Templates to connect ADOIT and ADONIS with PowerBI
 
-Connect for Power BI allows beginners and experts to create their own dashboards and work flexibly with ADOIT data.
+Connect for Power BI allows beginners and experts to create their own dashboards and work flexibly with ADOIT/ADONIS data.
 
 For more information, see our [wiki](https://github.com/BOC-Group/ConnectForPowerBI/wiki/Usage-Example)
 
 # Features
-* Pre-defined set of Power BI functions to load your ADOIT data.
-* Export objects from ADOIT to Power BI.
-* Connect different objects from ADOIT and synchronize those relations.
+* Pre-defined set of Power BI functions to load your ADOIT/ADONIS data.
+* Export objects from ADOIT/ADONIS to Power BI.
+* Connect different objects from ADOIT/ADONIS and synchronize those relations.
 
 # Version Information
 * VERSION: 4.1
-* Release Date: 11.06.2024
+* Release Date: 28.11.2024
 * Supported Languages: Every Language
 * Compatibility
   * ADOIT 15.0 or higher
+  * ADONIS 14.0 or higher
   * PowerBI Desktop 2.9 or higher
 * Support: Corrective
