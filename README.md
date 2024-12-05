@@ -2,7 +2,7 @@
 <p align="center">
   <p align="center">
     <img src="https://github.com/BOC-Group/ConnectForPowerBI/assets/28571214/8dd02229-6131-433a-a3c4-1d8e04358d89" alt="ADOIT Logo" width="45%">
-    ![2021 11 08 - ADONIS Connect for Power BI Thumb](https://github.com/user-attachments/assets/e62dec27-8139-4ef5-826d-63c8d9116081)
+    <img src="https://github-production-user-asset-6210df.s3.amazonaws.com/28571214/392823566-e62dec27-8139-4ef5-826d-63c8d9116081.png" alt="ADOIT Logo" width="45%">
 
   </p>
   
