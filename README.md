@@ -33,8 +33,8 @@ For more information, see our [wiki](https://github.com/BOC-Group/ConnectForPowe
 * Connect different objects from ADOIT/ADONIS and synchronize those relations.
 
 # Version Information
-* VERSION: 4.1
-* Release Date: 28.11.2024
+* VERSION: 4.2
+* Release Date: 21.02.2025
 * Supported Languages: Every Language
 * Compatibility
   * ADOIT 15.0 or higher
