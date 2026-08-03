@@ -1,0 +1,30 @@
+name: Build connector
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+
+      - name: Build MEZ package
+        shell: pwsh
+        run: ./build.ps1
+
+      - name: Upload connector package
+        uses: actions/upload-artifact@v4
+        with:
+          name: BOCADONISADOITConnector
+          path: |
+            dist/BOCADONISADOITConnector.mez
+            dist/BOCADONISADOITConnector.mez.sha256
+          if-no-files-found: error

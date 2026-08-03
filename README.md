@@ -3,41 +3,60 @@
 <h3 align="center">ConnectForPowerBI</h3>
 
 <p align="center">
-  <p align="center">
-    <img src="https://github.com/BOC-Group/ConnectForPowerBI/assets/28571214/8dd02229-6131-433a-a3c4-1d8e04358d89" alt="ADOIT Logo" width="45%">
-    <img src="https://raw.githubusercontent.com/wiki/BOC-Group/ConnectForPowerBI/images/ci/2021.11.08 - ADONIS Connect for Power BI Thumb.png" alt="ADONIS Logo" width="45%">
-  </p>
+  <img src="https://github.com/BOC-Group/ConnectForPowerBI/assets/28571214/8dd02229-6131-433a-a3c4-1d8e04358d89" alt="ADOIT logo" width="45%">
+  <img src="https://raw.githubusercontent.com/wiki/BOC-Group/ConnectForPowerBI/images/ci/2021.11.08%20-%20ADONIS%20Connect%20for%20Power%20BI%20Thumb.png" alt="ADONIS logo" width="45%">
+</p>
 
-  <p align="center">
-  An Awesome PowerBI Template To Jumpstart Your Projects!
+<p align="center">
+  A Power BI custom connector for ADONIS and ADOIT.
   <br/>
   <br/>
   <a href="https://github.com/BOC-Group/ConnectForPowerBI/wiki/"><strong>Explore the docs »</strong></a>
-  <br/>
-  <br/>
-   <img src="https://img.shields.io/github/license/BOC-Group/ConnectForPowerBI" alt="Logo">
-  </p>
 </p>
 
-
 # ConnectForPowerBI
-Templates to connect ADOIT and ADONIS with PowerBI
 
-Connect for Power BI allows beginners and experts to create their own dashboards and work flexibly with ADOIT/ADONIS data.
+ConnectForPowerBI makes ADONIS and ADOIT data available in Power BI through a custom connector. It allows report authors to build and refresh their own dashboards while working flexibly with repository data.
 
-For more information, see our [wiki](https://github.com/BOC-Group/ConnectForPowerBI/wiki/)
+For installation, OAuth configuration, and usage instructions, see the [project wiki](https://github.com/BOC-Group/ConnectForPowerBI/wiki/).
 
-# Features
-* Pre-defined set of Power BI functions to load your ADOIT/ADONIS data.
-* Export objects from ADOIT/ADONIS to Power BI.
-* Connect different objects from ADOIT/ADONIS and synchronize those relations.
+## Build
 
-# Version Information
-* VERSION: 4.2
-* Release Date: 21.02.2025
-* Supported Languages: Every Language
-* Compatibility
-  * ADOIT 15.0 or higher
-  * ADONIS 14.0 or higher
-  * PowerBI Desktop 2.9 or higher
-* Support: Self service
+### Portable PowerShell build
+
+The repository includes a packaging script that works with Windows PowerShell 5.1 or PowerShell 7 and requires no .NET SDK:
+
+```powershell
+./build.ps1
+```
+
+If the local execution policy blocks scripts, run:
+
+```powershell
+powershell -NoProfile -ExecutionPolicy Bypass -File ./build.ps1
+```
+
+The build produces:
+
+```text
+dist/BOCADONISADOITConnector.mez
+dist/BOCADONISADOITConnector.mez.sha256
+```
+
+The script reads the `MezContent` entries from `BOCADONISADOITConnector.proj`, rejects missing or unsafe paths, packages only those files, verifies the archive contents, and writes a SHA-256 checksum.
+
+To write the package elsewhere:
+
+```powershell
+./build.ps1 -OutputDirectory C:\Build\ConnectForPowerBI
+```
+
+### Power Query SDK build
+
+For connector development and interactive query testing:
+
+1. Install [Visual Studio Code](https://code.visualstudio.com/) and Microsoft's [Power Query SDK](https://marketplace.visualstudio.com/items?itemName=PowerQuery.vscode-powerquery-sdk).
+2. Open this repository folder in Visual Studio Code.
+3. Run the Power Query SDK build command.
+
+The SDK writes its package to `bin/AnyCPU/Debug/BOCADONISADOITConnector.mez`. The included workspace settings point the SDK at the connector and query files.

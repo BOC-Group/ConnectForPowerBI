@@ -1,0 +1,20 @@
+# Connector and SDK build output
+/bin/
+/obj/
+/dist/
+*.mez
+*.sha256
+
+# Local editor and operating-system files
+/.vs/
+*.suo
+*.user
+*.log
+*.tmp
+Thumbs.db
+.DS_Store
+
+# Local secrets
+.env
+.env.*
+!.env.example

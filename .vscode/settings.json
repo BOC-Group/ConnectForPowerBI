@@ -1,0 +1,5 @@
+{
+  "powerquery.sdk.defaultQueryFile": "${workspaceFolder}\\BOCADONISADOITConnector.query.pq",
+  "powerquery.sdk.defaultExtension": "${workspaceFolder}\\bin\\AnyCPU\\Debug\\BOCADONISADOITConnector.mez",
+  "powerquery.general.mode": "SDK"
+}
