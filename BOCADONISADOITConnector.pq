@@ -171,13 +171,49 @@ GetHumanReadableClassName = (classRecord as record, fallbackMetaName as text) as
 GetLoadClassExample = (classMetaName as text, attributesAndRelations as text) as text =>
     "#""Load Class by Technical Name""(""" & classMetaName & """, """ & attributesAndRelations & """)";
 
+// REST 4 exposes class lookup as a collection endpoint without a name query
+// parameter. Resolve technical names locally so products that ignore unknown
+// query parameters cannot accidentally return the first class in the list.
+// Support both spellings seen in REST responses across product generations.
+GetClassMetaName = (classRecord as record) as nullable text =>
+    let
+        candidates = List.Select(
+            {
+                Record.FieldOrDefault(classRecord, "metaName", null),
+                Record.FieldOrDefault(classRecord, "metaname", null)
+            },
+            each Value.Is(_, type text) and Text.Trim(_) <> ""
+        )
+    in
+        List.First(candidates, null);
+
+ResolveClassByMetaName = (baseUrl as text, className as text) as nullable record =>
+    let
+        classesResponse = getRequest(baseUrl, getBaseURL(baseUrl) & "metamodel/classes/"),
+        classesValue = Record.FieldOrDefault(classesResponse, "classes", {}),
+        classes =
+            if Value.Is(classesValue, type list)
+            then List.Select(classesValue, each Value.Is(_, type record))
+            else {},
+        requestedName = Text.Upper(Text.Trim(className)),
+        matches = List.Select(
+            classes,
+            each
+                let
+                    metaName = GetClassMetaName(_)
+                in
+                    metaName <> null and Text.Upper(metaName) = requestedName
+        )
+    in
+        List.First(matches, null);
+
 // Only expose metamodel classes intended for end-user selection.
 IsVisibleConcreteClass = (classRecord as record) as logical =>
     let
         isVisible = Record.FieldOrDefault(classRecord, "visible", false) = true,
         isAbstract = Record.FieldOrDefault(classRecord, "abstract", true) = true,
         hasIdentity =
-            Record.FieldOrDefault(classRecord, "metaName", null) <> null and
+            GetClassMetaName(classRecord) <> null and
             Record.FieldOrDefault(classRecord, "id", null) <> null
     in
         isVisible and not isAbstract and hasIdentity;
@@ -192,7 +228,7 @@ GetDynamicObjectClassRows = (baseUrl as text, repoId as text) as table =>
             concreteClasses,
             (classRecord as record) =>
                 let
-                    metaName = Text.From(classRecord[metaName]),
+                    metaName = Text.From(GetClassMetaName(classRecord)),
                     displayName = GetHumanReadableClassName(classRecord, metaName)
                 in
                     {
@@ -277,7 +313,7 @@ RelationAndAttributeNamesNavigationTable = (baseUrl as text) as table =>
             (classRecord as record) =>
                 let
                     classId = Text.From(classRecord[id]),
-                    metaName = Text.From(classRecord[metaName]),
+                    metaName = Text.From(GetClassMetaName(classRecord)),
                     displayName = GetHumanReadableClassName(classRecord, metaName)
                 in
                     {
@@ -428,16 +464,14 @@ GetClassNotebookFieldsFunction = (baseUrl as text) as function =>
     let
         implementation = (className as text) as table =>
             let
-                classUrl = getBaseURL(baseUrl) & "metamodel/classes/?name=" & Uri.EscapeDataString(className),
-                classResponse = try getRequest(baseUrl, classUrl) otherwise null,
-                classes = if Value.Is(classResponse, type record) then Record.FieldOrDefault(classResponse, "classes", {}) else {},
+                classRecord = try ResolveClassByMetaName(baseUrl, className) otherwise null,
                 result =
-                    if not Value.Is(classes, type list) or List.IsEmpty(classes)
+                    if classRecord = null
                     then #table({"Message"}, {{"Class '" & className & "' was not found."}})
                     else
                         let
-                            classRecord = classes{0},
-                            resolvedMetaName = Text.From(Record.FieldOrDefault(classRecord, "metaName", className))
+                            resolvedMetaNameValue = GetClassMetaName(classRecord),
+                            resolvedMetaName = if resolvedMetaNameValue = null then className else resolvedMetaNameValue
                         in
                             GetClassRelationAndAttributeNames(baseUrl, Text.From(classRecord[id]), resolvedMetaName)
             in
@@ -729,7 +763,7 @@ GetAvailableClassesFunction = (baseUrl as text) =>
                 classes,
                 (classRecord as record) =>
                     let
-                        metaName = Text.From(classRecord[metaName])
+                        metaName = Text.From(GetClassMetaName(classRecord))
                     in
                         [
                             MetaName = metaName,
@@ -754,16 +788,14 @@ GetAvailableClassesFunction = (baseUrl as text) =>
 GetClassAttributesFunction = (baseUrl as text) =>
     (className as text) =>
         let
-            // Get metamodel info for class
-            classMetaModelUrl = getBaseURL(baseUrl) & "metamodel/classes/?name=" & className,
-            classMetaModelResponse = try getRequest(baseUrl, classMetaModelUrl) otherwise null,
+            classRecord = try ResolveClassByMetaName(baseUrl, className) otherwise null,
             
             // If class wasn't found by name, return an error message
-            classResult = if classMetaModelResponse = null or List.IsEmpty(classMetaModelResponse[classes]) then 
+            classResult = if classRecord = null then
                              #table({"Message"}, {{"Class '" & className & "' not found. Check the class name and try again."}})
                           else
                              let
-                                 classId = classMetaModelResponse[classes]{0}[id],
+                                 classId = classRecord[id],
                                  
                                  // Get attributes for this class
                                  attrUrl = getBaseURL(baseUrl) & "metamodel/classes/" & classId & "/notebook/",
@@ -803,16 +835,14 @@ GetObjectWithAttributesFunction = (baseUrl as text) =>
 GetClassRelationsFunction = (baseUrl as text) =>
     (className as text) =>
         let
-            // Get metamodel info for class
-            classMetaModelUrl = getBaseURL(baseUrl) & "metamodel/classes/?name=" & className,
-            classMetaModelResponse = try getRequest(baseUrl, classMetaModelUrl) otherwise null,
+            classRecord = try ResolveClassByMetaName(baseUrl, className) otherwise null,
             
             // If class wasn't found by name, return an error message
-            classResult = if classMetaModelResponse = null or List.IsEmpty(classMetaModelResponse[classes]) then 
+            classResult = if classRecord = null then
                              #table({"Message"}, {{"Class '" & className & "' not found. Check the class name and try again."}})
                           else
                              let
-                                 classId = classMetaModelResponse[classes]{0}[id],
+                                 classId = classRecord[id],
                                  
                                  // Get relations for this class
                                  relUrl = getBaseURL(baseUrl) & "metamodel/classes/" & classId & "/relations/",
