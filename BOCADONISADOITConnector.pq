@@ -36,19 +36,28 @@ BOCADONISADOITConnector.ContentsType = type function (
         Documentation.FieldCaption = "Client ID (defaults to PowerBIID)",
         Documentation.FieldDescription = "OAuth public-client ID. Leave empty to use PowerBIID.",
         Documentation.SampleValues = {"PowerBIID"}
+    ]),
+    // Deliberately not part of the data source path: switching language must
+    // reuse the existing credential instead of prompting for a new sign-in.
+    optional language as (type text meta [
+        DataSource.Path = false,
+        Documentation.FieldCaption = "Language",
+        Documentation.FieldDescription = "Language used for attribute values and metamodel labels. Defaults to English.",
+        Documentation.AllowedValues = {"en", "de", "es", "fr"}
     ])
 ) as any;
 
 [DataSource.Kind="BOCADONISADOITConnector", Publish="BOCADONISADOITConnector.Publish"]
 shared BOCADONISADOITConnector.Contents = Value.ReplaceType(BOCADONISADOITConnector.ContentsImpl, BOCADONISADOITConnector.ContentsType);
 
-BOCADONISADOITConnector.ContentsImpl = (baseUrl as text, optional client_id as text) =>
+BOCADONISADOITConnector.ContentsImpl = (baseUrl as text, optional client_id as text, optional language as text) =>
     let
         baseUrlWithSlash = if Text.EndsWith(baseUrl, "/") then baseUrl else baseUrl & "/",
-        
+        effectiveLanguage = NormalizeLanguage(language),
+
         // Create the navigation table
-        repoList = GetReposList(baseUrlWithSlash),
-        relationAndAttributeNames = RelationAndAttributeNamesNavigationTable(baseUrlWithSlash),
+        repoList = GetReposList(baseUrlWithSlash, effectiveLanguage),
+        relationAndAttributeNames = RelationAndAttributeNamesNavigationTable(baseUrlWithSlash, effectiveLanguage),
         
         // Create the base navigation table
         objects = #table(
@@ -56,7 +65,7 @@ BOCADONISADOITConnector.ContentsImpl = (baseUrl as text, optional client_id as t
             {
                 {"Repositories", "repos", repoList, "Folder", "Folder", false},
                 {"Relation and Attribute Names", "metamodel_names", relationAndAttributeNames, "Folder", "Folder", false},
-                {"Functions", "functions", FunctionsNavigationTable(baseUrlWithSlash), "Folder", "Folder", false}
+                {"Functions", "functions", FunctionsNavigationTable(baseUrlWithSlash, effectiveLanguage), "Folder", "Folder", false}
             }
         ),
         NavTable = Table.ToNavigationTable(objects, {"Key"}, "Name", "Data", "ItemKind", "ItemName", "IsLeaf"),
@@ -64,36 +73,36 @@ BOCADONISADOITConnector.ContentsImpl = (baseUrl as text, optional client_id as t
         // Also expose the API functions for backwards compatibility
         result = Value.ReplaceMetadata(NavTable, [
             GetObject = (objectName as text, langIndependantAttributes as list, langDependantAttributes as list, optional repositoryId as text) =>
-                getObject(baseUrlWithSlash, objectName, langIndependantAttributes, langDependantAttributes, repositoryId),
+                getObject(baseUrlWithSlash, effectiveLanguage, objectName, langIndependantAttributes, langDependantAttributes, repositoryId),
             GetObjectWithName = (objectName as text, langIndependentAttributes as list, langDependentAttributes as list, optional repositoryId as text) =>
-                getObjectWithName(baseUrlWithSlash, objectName, langIndependentAttributes, langDependentAttributes, repositoryId),
+                getObjectWithName(baseUrlWithSlash, effectiveLanguage, objectName, langIndependentAttributes, langDependentAttributes, repositoryId),
             GetObjectWithNameDelimiter = (objectName as text, langIndependentAttributes as list, langDependentAttributes as list, delimiter, optional repositoryId as text) =>
-                getObjectWithNameDelimiter(baseUrlWithSlash, objectName, langIndependentAttributes, langDependentAttributes, delimiter, repositoryId),
+                getObjectWithNameDelimiter(baseUrlWithSlash, effectiveLanguage, objectName, langIndependentAttributes, langDependentAttributes, delimiter, repositoryId),
             GetObjectWithType = (objectName as text, langIndependentAttributes as list, langDependentAttributes as list, optional repositoryId as text) =>
-                getObjectWithType(baseUrlWithSlash, objectName, langIndependentAttributes, langDependentAttributes, repositoryId),
-            GetObjectWithAttributes = GetObjectWithAttributesFunction(baseUrlWithSlash),
+                getObjectWithType(baseUrlWithSlash, effectiveLanguage, objectName, langIndependentAttributes, langDependentAttributes, repositoryId),
+            GetObjectWithAttributes = GetObjectWithAttributesFunction(baseUrlWithSlash, effectiveLanguage),
             GetRelationTable = (objectA as text, relationName as text, objectB as text, optional repositoryId as text) =>
-                getRelationTable(baseUrlWithSlash, objectA, relationName, objectB, repositoryId),
+                getRelationTable(baseUrlWithSlash, effectiveLanguage, objectA, relationName, objectB, repositoryId),
             GetRelationTableIncoming = (objectA as text, relationName as text, objectB as text, optional repositoryId as text) =>
-                getRelationTableIncoming(baseUrlWithSlash, objectA, relationName, objectB, repositoryId),
+                getRelationTableIncoming(baseUrlWithSlash, effectiveLanguage, objectA, relationName, objectB, repositoryId),
             GetRelationTableOutgoing = (objectA as text, relationName as text, objectB as text, optional repositoryId as text) =>
-                getRelationTableOutgoing(baseUrlWithSlash, objectA, relationName, objectB, repositoryId),
-            GetCustomClassFunction = GetCustomClassFunction(baseUrlWithSlash),
-            GetCustomRelationFunction = GetCustomRelationFunction(baseUrlWithSlash),
-            GetAvailableRepositories = GetAvailableRepositoriesFunction(baseUrlWithSlash),
-            ListSavedSearches = GetSavedSearchesFunction(baseUrlWithSlash),
-            ExecuteSavedSearch = GetExecuteSavedSearchFunction(baseUrlWithSlash),
-            GetAvailableClasses = GetAvailableClassesFunction(baseUrlWithSlash),
-            GetClassAttributes = GetClassAttributesFunction(baseUrlWithSlash),
-            GetClassRelations = GetClassRelationsFunction(baseUrlWithSlash)
+                getRelationTableOutgoing(baseUrlWithSlash, effectiveLanguage, objectA, relationName, objectB, repositoryId),
+            GetCustomClassFunction = GetCustomClassFunction(baseUrlWithSlash, effectiveLanguage),
+            GetCustomRelationFunction = GetCustomRelationFunction(baseUrlWithSlash, effectiveLanguage),
+            GetAvailableRepositories = GetAvailableRepositoriesFunction(baseUrlWithSlash, effectiveLanguage),
+            ListSavedSearches = GetSavedSearchesFunction(baseUrlWithSlash, effectiveLanguage),
+            ExecuteSavedSearch = GetExecuteSavedSearchFunction(baseUrlWithSlash, effectiveLanguage),
+            GetAvailableClasses = GetAvailableClassesFunction(baseUrlWithSlash, effectiveLanguage),
+            GetClassAttributes = GetClassAttributesFunction(baseUrlWithSlash, effectiveLanguage),
+            GetClassRelations = GetClassRelationsFunction(baseUrlWithSlash, effectiveLanguage)
         ])
     in
         result;
 
 // Get list of repositories
-GetReposList = (baseUrl as text) =>
+GetReposList = (baseUrl as text, language as text) =>
     let
-        reposResponse = getRequest(baseUrl, getBaseURL(baseUrl) & "repos/"),
+        reposResponse = getRequest(baseUrl, language, getBaseURL(baseUrl) & "repos/"),
         repos = reposResponse[repos],
         repoTable = Table.FromList(repos, Splitter.SplitByNothing(), null, null, ExtraValues.Error),
         expandedRepos = Table.ExpandRecordColumn(repoTable, "Column1", {"id", "name"}, {"RepoID", "RepoName"}),
@@ -104,7 +113,7 @@ GetReposList = (baseUrl as text) =>
             (repo) => {
                 repo[RepoName],
                 repo[RepoID],
-                ObjectsInRepoNavigationTable(baseUrl, repo[RepoID], repo[RepoName]),
+                ObjectsInRepoNavigationTable(baseUrl, language, repo[RepoID], repo[RepoName]),
                 "Folder",
                 "Folder",
                 false
@@ -121,9 +130,9 @@ GetReposList = (baseUrl as text) =>
         result;
 
 // Get objects for a specific repository
-ObjectsInRepoNavigationTable = (baseUrl as text, repoId as text, repoName as text) =>
+ObjectsInRepoNavigationTable = (baseUrl as text, language as text, repoId as text, repoName as text) =>
     let
-        dynamicClasses = GetDynamicObjectClassRows(baseUrl, repoId),
+        dynamicClasses = GetDynamicObjectClassRows(baseUrl, language, repoId),
         result = Table.ToNavigationTable(dynamicClasses, {"Key"}, "Name", "Data", "ItemKind", "ItemName", "IsLeaf")
     in
         result;
@@ -131,25 +140,55 @@ ObjectsInRepoNavigationTable = (baseUrl as text, repoId as text, repoName as tex
 // Prefer a localized metamodel label. Older installations may only expose a
 // technical name, so turn names such as C_APPLICATION_COMPONENT into
 // "Application Component" as a final fallback.
-GetHumanReadableClassName = (classRecord as record, fallbackMetaName as text) as text =>
+// Supported ISO 639-1 codes for the Accept-Language header and for picking a
+// translation out of a metamodel displayNames record.
+default_language = "en";
+supported_languages = {"en", "de", "es", "fr"};
+
+// An unset or unrecognised value falls back to English rather than failing, so
+// an existing report keeps refreshing if it was built before this option
+// existed or if it stored a language the installation no longer offers.
+NormalizeLanguage = (language as nullable text) as text =>
+    let
+        trimmed = if language = null then "" else Text.Lower(Text.Trim(language)),
+        result = if List.Contains(supported_languages, trimmed) then trimmed else default_language
+    in
+        result;
+
+// The metamodel endpoints do not accept Accept-Language. They return every
+// translation at once in a displayNames record, so the label for the selected
+// language is picked on the client. Fall back to English, then to whatever
+// translation the installation actually ships.
+PickDisplayName = (displayNames as any, language as text) as nullable text =>
+    let
+        isRecord = Value.Is(displayNames, type record),
+        preferred = if isRecord then Record.FieldOrDefault(displayNames, language, null) else null,
+        english = if isRecord then Record.FieldOrDefault(displayNames, "en", null) else null,
+        anyLocalized =
+            if isRecord
+            then List.First(
+                List.Select(
+                    Record.FieldValues(displayNames),
+                    each Value.Is(_, type text) and Text.Trim(_) <> ""
+                ),
+                null
+            )
+            else null,
+        candidates = List.Select(
+            {preferred, english, anyLocalized},
+            each Value.Is(_, type text) and Text.Trim(_) <> ""
+        )
+    in
+        List.First(candidates, null);
+
+GetHumanReadableClassName = (classRecord as record, fallbackMetaName as text, language as text) as text =>
     let
         displayNames = Record.FieldOrDefault(classRecord, "displayNames", null),
-        englishDisplayName =
-            if Value.Is(displayNames, type record)
-            then Record.FieldOrDefault(displayNames, "en", null)
-            else null,
-        localizedDisplayNames =
-            if Value.Is(displayNames, type record)
-            then List.Select(
-                Record.FieldValues(displayNames),
-                each Value.Is(_, type text) and Text.Trim(_) <> ""
-            )
-            else {},
-        firstLocalizedDisplayName = List.First(localizedDisplayNames, null),
+        localizedDisplayName = PickDisplayName(displayNames, language),
         displayName = Record.FieldOrDefault(classRecord, "displayName", null),
         configuredName = Record.FieldOrDefault(classRecord, "name", null),
         candidates = List.Select(
-            {englishDisplayName, firstLocalizedDisplayName, displayName, configuredName},
+            {localizedDisplayName, displayName, configuredName},
             each Value.Is(_, type text) and Text.Trim(_) <> ""
         ),
         metamodelName = List.First(candidates, null),
@@ -187,9 +226,9 @@ GetClassMetaName = (classRecord as record) as nullable text =>
     in
         List.First(candidates, null);
 
-ResolveClassByMetaName = (baseUrl as text, className as text) as nullable record =>
+ResolveClassByMetaName = (baseUrl as text, language as text, className as text) as nullable record =>
     let
-        classesResponse = getRequest(baseUrl, getBaseURL(baseUrl) & "metamodel/classes/"),
+        classesResponse = getRequest(baseUrl, language, getBaseURL(baseUrl) & "metamodel/classes/"),
         classesValue = Record.FieldOrDefault(classesResponse, "classes", {}),
         classes =
             if Value.Is(classesValue, type list)
@@ -219,9 +258,9 @@ IsVisibleConcreteClass = (classRecord as record) as logical =>
         isVisible and not isAbstract and hasIdentity;
 
 // Build navigation rows from the classes configured in the customer's metamodel.
-GetDynamicObjectClassRows = (baseUrl as text, repoId as text) as table =>
+GetDynamicObjectClassRows = (baseUrl as text, language as text, repoId as text) as table =>
     let
-        classesResponse = getRequest(baseUrl, getBaseURL(baseUrl) & "metamodel/classes/"),
+        classesResponse = getRequest(baseUrl, language, getBaseURL(baseUrl) & "metamodel/classes/"),
         classes = Record.FieldOrDefault(classesResponse, "classes", {}),
         concreteClasses = List.Select(classes, each IsVisibleConcreteClass(_)),
         classEntries = List.Transform(
@@ -229,12 +268,12 @@ GetDynamicObjectClassRows = (baseUrl as text, repoId as text) as table =>
             (classRecord as record) =>
                 let
                     metaName = Text.From(GetClassMetaName(classRecord)),
-                    displayName = GetHumanReadableClassName(classRecord, metaName)
+                    displayName = GetHumanReadableClassName(classRecord, metaName, language)
                 in
                     {
                         displayName,
                         metaName & "_" & repoId,
-                        GetClassFieldSelectionFunction(baseUrl, metaName, displayName, repoId),
+                        GetClassFieldSelectionFunction(baseUrl, language, metaName, displayName, repoId),
                         "Function",
                         "Function",
                         true
@@ -275,12 +314,12 @@ ParseCommaSeparatedNames = (value as nullable text) as list =>
 
 // Repository class leaves are functions so the requested field list remains
 // visible and editable in the generated M query.
-GetClassFieldSelectionFunction = (baseUrl as text, objectClassName as text, displayName as text, repoId as text) as function =>
+GetClassFieldSelectionFunction = (baseUrl as text, language as text, objectClassName as text, displayName as text, repoId as text) as function =>
     let
         implementation = (optional attributesAndRelations as nullable text) as table =>
             let
                 requestedFields = List.Distinct({"NAME"} & ParseCommaSeparatedNames(attributesAndRelations)),
-                objects = getObjectWithNameDelimiter(baseUrl, objectClassName, requestedFields, {}, "; ", repoId),
+                objects = getObjectWithNameDelimiter(baseUrl, language, objectClassName, requestedFields, {}, "; ", repoId),
                 result =
                     if Table.IsEmpty(objects)
                     then #table(
@@ -303,9 +342,9 @@ GetClassFieldSelectionFunction = (baseUrl as text, objectClassName as text, disp
 
 // Add one mapping table per class so report authors can discover the technical
 // attribute and relation names required by the custom query functions.
-RelationAndAttributeNamesNavigationTable = (baseUrl as text) as table =>
+RelationAndAttributeNamesNavigationTable = (baseUrl as text, language as text) as table =>
     let
-        classesResponse = getRequest(baseUrl, getBaseURL(baseUrl) & "metamodel/classes/"),
+        classesResponse = getRequest(baseUrl, language, getBaseURL(baseUrl) & "metamodel/classes/"),
         classes = Record.FieldOrDefault(classesResponse, "classes", {}),
         concreteClasses = List.Select(classes, each IsVisibleConcreteClass(_)),
         classEntries = List.Transform(
@@ -314,12 +353,12 @@ RelationAndAttributeNamesNavigationTable = (baseUrl as text) as table =>
                 let
                     classId = Text.From(classRecord[id]),
                     metaName = Text.From(GetClassMetaName(classRecord)),
-                    displayName = GetHumanReadableClassName(classRecord, metaName)
+                    displayName = GetHumanReadableClassName(classRecord, metaName, language)
                 in
                     {
                         displayName & " - A/R",
                         "metamodel_names_" & metaName,
-                        GetClassRelationAndAttributeNames(baseUrl, classId, metaName),
+                        GetClassRelationAndAttributeNames(baseUrl, language, classId, metaName),
                         "Table",
                         "Table",
                         true
@@ -334,9 +373,9 @@ RelationAndAttributeNamesNavigationTable = (baseUrl as text) as table =>
     in
         result;
 
-GetClassRelationAndAttributeNames = (baseUrl as text, classId as text, classMetaName as text) as table =>
+GetClassRelationAndAttributeNames = (baseUrl as text, language as text, classId as text, classMetaName as text) as table =>
     let
-        notebookResponse = try getRequest(baseUrl, getBaseURL(baseUrl) & "metamodel/classes/" & classId & "/notebook/") otherwise [chapters = {}],
+        notebookResponse = try getRequest(baseUrl, language, getBaseURL(baseUrl) & "metamodel/classes/" & classId & "/notebook/") otherwise [chapters = {}],
         chapters = Record.FieldOrDefault(notebookResponse, "chapters", {}),
         notebookNodes = if Value.Is(chapters, type list) then FlattenNotebookNodes(chapters) else {},
         notebookItems = List.Select(
@@ -361,7 +400,7 @@ GetClassRelationAndAttributeNames = (baseUrl as text, classId as text, classMeta
                     {
                         kind,
                         metaName,
-                        GetHumanReadableClassName(_, metaName),
+                        GetHumanReadableClassName(_, metaName, language),
                         GetLoadClassExample(classMetaName, metaName)
                     }
         ),
@@ -375,19 +414,19 @@ GetClassRelationAndAttributeNames = (baseUrl as text, classId as text, classMeta
         result;
 
 // Create a navigation table for functions
-FunctionsNavigationTable = (baseUrl as text) =>
+FunctionsNavigationTable = (baseUrl as text, language as text) =>
     let
         // Create a navigation table with helper functions
         functions = #table(
             {"Name", "Key", "Data", "ItemKind", "ItemName", "IsLeaf"},
             {
-                {"Load Class by Technical Name", "load_class", GetGenericClassFunction(baseUrl), "Function", "Function", true},
-                {"Load Relation Table", "load_relation", GetEndUserRelationFunction(baseUrl), "Function", "Function", true},
-                {"List Available Repositories", "available_repositories", GetAvailableRepositoriesFunction(baseUrl), "Function", "Function", true},
-                {"List Saved Searches", "saved_searches", GetSavedSearchesFunction(baseUrl), "Function", "Function", true},
-                {"Execute Saved Search", "execute_saved_search", GetExecuteSavedSearchFunction(baseUrl), "Function", "Function", true},
-                {"List Available Classes", "available_classes", GetAvailableClassesFunction(baseUrl), "Function", "Function", true},
-                {"List Class Notebook A/R", "class_notebook_fields", GetClassNotebookFieldsFunction(baseUrl), "Function", "Function", true}
+                {"Load Class by Technical Name", "load_class", GetGenericClassFunction(baseUrl, language), "Function", "Function", true},
+                {"Load Relation Table", "load_relation", GetEndUserRelationFunction(baseUrl, language), "Function", "Function", true},
+                {"List Available Repositories", "available_repositories", GetAvailableRepositoriesFunction(baseUrl, language), "Function", "Function", true},
+                {"List Saved Searches", "saved_searches", GetSavedSearchesFunction(baseUrl, language), "Function", "Function", true},
+                {"Execute Saved Search", "execute_saved_search", GetExecuteSavedSearchFunction(baseUrl, language), "Function", "Function", true},
+                {"List Available Classes", "available_classes", GetAvailableClassesFunction(baseUrl, language), "Function", "Function", true},
+                {"List Class Notebook A/R", "class_notebook_fields", GetClassNotebookFieldsFunction(baseUrl, language), "Function", "Function", true}
             }
         ),
         
@@ -397,15 +436,15 @@ FunctionsNavigationTable = (baseUrl as text) =>
 
 // Generic class loader for technical or hidden classes that are not exposed
 // beneath a repository in the Navigator.
-GetGenericClassFunction = (baseUrl as text) as function =>
+GetGenericClassFunction = (baseUrl as text, language as text) as function =>
     let
         implementation = (className as text, optional attributesAndRelations as nullable text, optional repositoryId as text) as table =>
             let
                 effectiveRepoId =
                     if repositoryId = null or Text.Trim(repositoryId) = ""
-                    then getRepoID(baseUrl, 1)
+                    then getRepoID(baseUrl, language, 1)
                     else repositoryId,
-                loader = GetClassFieldSelectionFunction(baseUrl, className, className, effectiveRepoId),
+                loader = GetClassFieldSelectionFunction(baseUrl, language, className, className, effectiveRepoId),
                 result = loader(attributesAndRelations)
             in
                 result,
@@ -429,9 +468,9 @@ GetGenericClassFunction = (baseUrl as text) as function =>
         result;
 
 // Human-readable wrapper around the generic relation builder.
-GetEndUserRelationFunction = (baseUrl as text) as function =>
+GetEndUserRelationFunction = (baseUrl as text, language as text) as function =>
     let
-        implementation = GetCustomRelationFunction(baseUrl),
+        implementation = GetCustomRelationFunction(baseUrl, language),
         functionType = type function (
             sourceClass as (type text meta [
                 Documentation.FieldCaption = "Source class (technical name)",
@@ -460,11 +499,11 @@ GetEndUserRelationFunction = (baseUrl as text) as function =>
 
 // Resolve a technical class name and return the same recursively parsed
 // notebook fields used by the A/R mapping tables.
-GetClassNotebookFieldsFunction = (baseUrl as text) as function =>
+GetClassNotebookFieldsFunction = (baseUrl as text, language as text) as function =>
     let
         implementation = (className as text) as table =>
             let
-                classRecord = try ResolveClassByMetaName(baseUrl, className) otherwise null,
+                classRecord = try ResolveClassByMetaName(baseUrl, language, className) otherwise null,
                 result =
                     if classRecord = null
                     then #table({"Message"}, {{"Class '" & className & "' was not found."}})
@@ -473,7 +512,7 @@ GetClassNotebookFieldsFunction = (baseUrl as text) as function =>
                             resolvedMetaNameValue = GetClassMetaName(classRecord),
                             resolvedMetaName = if resolvedMetaNameValue = null then className else resolvedMetaNameValue
                         in
-                            GetClassRelationAndAttributeNames(baseUrl, Text.From(classRecord[id]), resolvedMetaName)
+                            GetClassRelationAndAttributeNames(baseUrl, language, Text.From(classRecord[id]), resolvedMetaName)
             in
                 result,
         functionType = type function (
@@ -488,10 +527,10 @@ GetClassNotebookFieldsFunction = (baseUrl as text) as function =>
 
 // Return repository IDs exactly as expected by the repository-scoped loader
 // functions, together with their readable names.
-GetAvailableRepositoriesFunction = (baseUrl as text) as function =>
+GetAvailableRepositoriesFunction = (baseUrl as text, language as text) as function =>
     () as table =>
         let
-            reposResponse = getRequest(baseUrl, getBaseURL(baseUrl) & "repos/"),
+            reposResponse = getRequest(baseUrl, language, getBaseURL(baseUrl) & "repos/"),
             reposValue = Record.FieldOrDefault(reposResponse, "repos", {}),
             repos = if Value.Is(reposValue, type list) then reposValue else {},
             reposTable = Table.FromList(repos, Splitter.SplitByNothing(), {"Repository"}, null, ExtraValues.Error),
@@ -500,13 +539,13 @@ GetAvailableRepositoriesFunction = (baseUrl as text) as function =>
         in
             result;
 
-GetSavedSearchesFunction = (baseUrl as text) as function =>
+GetSavedSearchesFunction = (baseUrl as text, language as text) as function =>
     let
         implementation = (optional repositoryId as text, optional scope as text) as table =>
             let
                 effectiveRepoId =
                     if repositoryId = null or Text.Trim(repositoryId) = ""
-                    then getRepoID(baseUrl, 1)
+                    then getRepoID(baseUrl, language, 1)
                     else repositoryId,
                 effectiveScope = if scope = null or Text.Trim(scope) = "" then "ALL" else Text.Upper(Text.Trim(scope)),
                 validScopes = {"ALL", "OWN", "PUBLISHED"},
@@ -520,7 +559,7 @@ GetSavedSearchesFunction = (baseUrl as text) as function =>
                     else
                         Json.Document(
                             Web.Contents(baseUrl, [
-                                Headers = [#"Accept-Language" = "en"],
+                                Headers = [#"Accept-Language" = language],
                                 RelativePath = "rest/4.0/repos/" & effectiveRepoId & "/search/saved-queries",
                                 Query = [scope = effectiveScope]
                             ])
@@ -593,6 +632,7 @@ NormalizeSearchItem = (item as record) as record =>
 
 ExecuteSavedSearchPaged = (
     baseUrl as text,
+    language as text,
     queryId as text,
     optional repositoryId as text,
     optional attributes as text,
@@ -602,7 +642,7 @@ ExecuteSavedSearchPaged = (
     let
         effectiveRepoId =
             if repositoryId = null or Text.Trim(repositoryId) = ""
-            then getRepoID(baseUrl, 1)
+            then getRepoID(baseUrl, language, 1)
             else repositoryId,
         normalizedQueryId = NormalizeSavedSearchId(queryId),
         validatedQueryId =
@@ -635,7 +675,7 @@ ExecuteSavedSearchPaged = (
                     Web.Contents(baseUrl, [
                         Headers = [
                             Accept = "application/json",
-                            #"Accept-Language" = "en"
+                            #"Accept-Language" = language
                         ],
                         RelativePath = endpoint & "?" & Text.Combine(queryParts, "&")
                     ])
@@ -678,7 +718,7 @@ ExecuteSavedSearchPaged = (
     in
         result;
 
-GetExecuteSavedSearchFunction = (baseUrl as text) as function =>
+GetExecuteSavedSearchFunction = (baseUrl as text, language as text) as function =>
     let
         implementation = (
             queryId as text,
@@ -689,6 +729,7 @@ GetExecuteSavedSearchFunction = (baseUrl as text) as function =>
         ) as table =>
             ExecuteSavedSearchPaged(
                 baseUrl,
+                language,
                 queryId,
                 repositoryId,
                 attributes,
@@ -726,34 +767,34 @@ GetExecuteSavedSearchFunction = (baseUrl as text) as function =>
         result;
 
 // Function to get a custom class
-GetCustomClassFunction = (baseUrl as text) =>
+GetCustomClassFunction = (baseUrl as text, language as text) =>
     (className as text, optional attributes as list, optional repositoryId as text) =>
         let
             langIndAttr = if attributes = null then {"NAME"} else attributes,
-            result = getObjectWithType(baseUrl, className, langIndAttr, {}, repositoryId)
+            result = getObjectWithType(baseUrl, language, className, langIndAttr, {}, repositoryId)
         in
             result;
 
 // Function to build a custom relation
-GetCustomRelationFunction = (baseUrl as text) =>
+GetCustomRelationFunction = (baseUrl as text, language as text) =>
     (sourceClass as text, relationName as text, targetClass as text, optional direction as text, optional repositoryId as text) =>
         let
             dir = if direction = null then "BOTH" else direction,
             result = if dir = "INCOMING" then 
-                        getRelationTableIncoming(baseUrl, sourceClass, relationName, targetClass, repositoryId)
+                        getRelationTableIncoming(baseUrl, language, sourceClass, relationName, targetClass, repositoryId)
                      else if dir = "OUTGOING" then
-                        getRelationTableOutgoing(baseUrl, sourceClass, relationName, targetClass, repositoryId)
+                        getRelationTableOutgoing(baseUrl, language, sourceClass, relationName, targetClass, repositoryId)
                      else
-                        getRelationTable(baseUrl, sourceClass, relationName, targetClass, repositoryId)
+                        getRelationTable(baseUrl, language, sourceClass, relationName, targetClass, repositoryId)
         in
             result;
 
 // Function to get available classes
-GetAvailableClassesFunction = (baseUrl as text) =>
+GetAvailableClassesFunction = (baseUrl as text, language as text) =>
     () =>
         let
             metaModelUrl = getBaseURL(baseUrl) & "metamodel/classes/",
-            metaModelResponse = getRequest(baseUrl, metaModelUrl),
+            metaModelResponse = getRequest(baseUrl, language, metaModelUrl),
             classes = List.Select(metaModelResponse[classes], each IsVisibleConcreteClass(_)),
             
             // Resolve the same localized display name used by the Navigator.
@@ -767,7 +808,7 @@ GetAvailableClassesFunction = (baseUrl as text) =>
                     in
                         [
                             MetaName = metaName,
-                            ClassName = GetHumanReadableClassName(classRecord, metaName)
+                            ClassName = GetHumanReadableClassName(classRecord, metaName, language)
                         ]
             ),
             concreteClasses = Table.FromRecords(
@@ -785,10 +826,10 @@ GetAvailableClassesFunction = (baseUrl as text) =>
             resultTable;
 
 // Function to get available attributes for a class
-GetClassAttributesFunction = (baseUrl as text) =>
+GetClassAttributesFunction = (baseUrl as text, language as text) =>
     (className as text) =>
         let
-            classRecord = try ResolveClassByMetaName(baseUrl, className) otherwise null,
+            classRecord = try ResolveClassByMetaName(baseUrl, language, className) otherwise null,
             
             // If class wasn't found by name, return an error message
             classResult = if classRecord = null then
@@ -799,7 +840,7 @@ GetClassAttributesFunction = (baseUrl as text) =>
                                  
                                  // Get attributes for this class
                                  attrUrl = getBaseURL(baseUrl) & "metamodel/classes/" & classId & "/notebook/",
-                                 attrResponse = getRequest(baseUrl, attrUrl),
+                                 attrResponse = getRequest(baseUrl, language, attrUrl),
                                  chapters = List.Transform(attrResponse[chapters], each _[children]),
                                  
                                  // Transform to table
@@ -809,8 +850,16 @@ GetClassAttributesFunction = (baseUrl as text) =>
                                      {"id", "metaName", "displayNames", "properties"}, 
                                      {"AttrID", "MetaName", "DisplayNames", "Properties"}),
                                      
-                                 // Expand display names to get readable name
-                                 expandedNames = Table.ExpandRecordColumn(expandedDetails, "DisplayNames", {"en"}, {"Name"}),
+                                 // Pick the readable name for the selected language
+                                 expandedNames = Table.RemoveColumns(
+                                     Table.AddColumn(
+                                         expandedDetails,
+                                         "Name",
+                                         each PickDisplayName([DisplayNames], language),
+                                         type nullable text
+                                     ),
+                                     {"DisplayNames"}
+                                 ),
                                  
                                  // Add example usage
                                  withExamples = Table.AddColumn(expandedNames, "Example Usage", 
@@ -824,18 +873,18 @@ GetClassAttributesFunction = (baseUrl as text) =>
             classResult;
 
 // Function to get an object with specific attributes
-GetObjectWithAttributesFunction = (baseUrl as text) =>
+GetObjectWithAttributesFunction = (baseUrl as text, language as text) =>
     (objectName as text, attributes as list, optional repositoryId as text) =>
         let
-            result = getObjectWithType(baseUrl, objectName, attributes, {}, repositoryId)
+            result = getObjectWithType(baseUrl, language, objectName, attributes, {}, repositoryId)
         in
             result;
 
 // Function to get all available relations for a class
-GetClassRelationsFunction = (baseUrl as text) =>
+GetClassRelationsFunction = (baseUrl as text, language as text) =>
     (className as text) =>
         let
-            classRecord = try ResolveClassByMetaName(baseUrl, className) otherwise null,
+            classRecord = try ResolveClassByMetaName(baseUrl, language, className) otherwise null,
             
             // If class wasn't found by name, return an error message
             classResult = if classRecord = null then
@@ -846,7 +895,7 @@ GetClassRelationsFunction = (baseUrl as text) =>
                                  
                                  // Get relations for this class
                                  relUrl = getBaseURL(baseUrl) & "metamodel/classes/" & classId & "/relations/",
-                                 relResponse = getRequest(baseUrl, relUrl),
+                                 relResponse = getRequest(baseUrl, language, relUrl),
                                  relations = relResponse[relations],
                                  
                                  // Transform to table
@@ -855,8 +904,16 @@ GetClassRelationsFunction = (baseUrl as text) =>
                                      {"id", "metaName", "name", "toClass", "toClassName", "fromClassName", "displayNames"}, 
                                      {"RelationID", "MetaName", "TechnicalName", "ToClassID", "ToClassName", "FromClassName", "DisplayNames"}),
                                  
-                                 // Expand display names to get readable name
-                                 expandedNames = Table.ExpandRecordColumn(expandedRels, "DisplayNames", {"en"}, {"Name"}),
+                                 // Pick the readable name for the selected language
+                                 expandedNames = Table.RemoveColumns(
+                                     Table.AddColumn(
+                                         expandedRels,
+                                         "Name",
+                                         each PickDisplayName([DisplayNames], language),
+                                         type nullable text
+                                     ),
+                                     {"DisplayNames"}
+                                 ),
                                  
                                  // Add directions info and examples
                                  withDirections = Table.AddColumn(expandedNames, "Directions", each 
@@ -881,11 +938,15 @@ GetClassRelationsFunction = (baseUrl as text) =>
 // Helper functions for the connector
 
 // getRequest using authentication from the connector
-getRequest = (baseUrl as text, request_url as text) =>
+getRequest = (baseUrl as text, language as text, request_url as text) =>
     let
         relativePath = Text.Replace(request_url, baseUrl, ""),
         result = Json.Document(Web.Contents(baseUrl, [
-            RelativePath = relativePath
+            RelativePath = relativePath,
+            Headers = [
+                Accept = "application/json",
+                #"Accept-Language" = language
+            ]
             //ManualStatusHandling = {400, 401, 403, 404, 500}
         ]))
     in
@@ -897,9 +958,9 @@ getBaseURL = (baseUrl as text) =>
     in
         result;
 
-getRepoID = (baseUrl as text, repoIndex as number) =>
+getRepoID = (baseUrl as text, language as text, repoIndex as number) =>
     let
-        response = getRequest(baseUrl, getBaseURL(baseUrl) & "repos/"),
+        response = getRequest(baseUrl, language, getBaseURL(baseUrl) & "repos/"),
         repos = response[repos],
         repo = if repoIndex < 1 or repoIndex > List.Count(repos) then
                    error Error.Record("Repository Error", "Repository index is out of range.", [RepositoryIndex = repoIndex, RepositoryCount = List.Count(repos)])
@@ -909,17 +970,17 @@ getRepoID = (baseUrl as text, repoIndex as number) =>
     in
         result;
 
-searchObject = (baseUrl as text, objectName as text, optional repositoryId as text) =>
+searchObject = (baseUrl as text, language as text, objectName as text, optional repositoryId as text) =>
     let
-        repoID = if repositoryId = null then getRepoID(baseUrl, 1) else repositoryId,
-        result = getRequest(baseUrl, getBaseURL(baseUrl) & "repos/" & repoID & "/search?range-start=0&query=%7Bfilters%3A%5B%7B%22className%22%3A%22" & objectName & "%22%7D%5D%7D&range-end=-1&")
+        repoID = if repositoryId = null then getRepoID(baseUrl, language, 1) else repositoryId,
+        result = getRequest(baseUrl, language, getBaseURL(baseUrl) & "repos/" & repoID & "/search?range-start=0&query=%7Bfilters%3A%5B%7B%22className%22%3A%22" & objectName & "%22%7D%5D%7D&range-end=-1&")
     in
         result;
 
-searchObjectAttributes = (baseUrl as text, objectName as text, attributes as list, relationDirection as text, optional repositoryId as text) =>
+searchObjectAttributes = (baseUrl as text, language as text, objectName as text, attributes as list, relationDirection as text, optional repositoryId as text) =>
     let
-        repoID = if repositoryId = null then getRepoID(baseUrl, 1) else repositoryId,
-        result = searchObjectWithJob(baseUrl, objectName, attributes, relationDirection, repoID)
+        repoID = if repositoryId = null then getRepoID(baseUrl, language, 1) else repositoryId,
+        result = searchObjectWithJob(baseUrl, language, objectName, attributes, relationDirection, repoID)
     in
         result;
 
@@ -1001,10 +1062,10 @@ ProcessSearchItems = (items as list, langIndependentAttributes as list, langDepe
     in
         Result;
 
-_getObject = (baseUrl as text, objectName as text, langIndependentAttributes as list, langDependentAttributes as list, getterType as text, optional delimiter as text, optional relationDirection as text, optional repositoryId as text) =>
+_getObject = (baseUrl as text, language as text, objectName as text, langIndependentAttributes as list, langDependentAttributes as list, getterType as text, optional delimiter as text, optional relationDirection as text, optional repositoryId as text) =>
     let
         relationDirectionWithDefault = if relationDirection = null then "BOTH" else relationDirection,
-        Quelle = if List.Count(langIndependentAttributes) = 0 then searchObject(baseUrl, objectName, repositoryId) else searchObjectAttributes(baseUrl, objectName, langIndependentAttributes, relationDirectionWithDefault, repositoryId),
+        Quelle = if List.Count(langIndependentAttributes) = 0 then searchObject(baseUrl, language, objectName, repositoryId) else searchObjectAttributes(baseUrl, language, objectName, langIndependentAttributes, relationDirectionWithDefault, repositoryId),
         rawItemsValue = Record.FieldOrDefault(Quelle, "items", {}),
         rawItems = if Value.Is(rawItemsValue, type list) then rawItemsValue else {},
         items = List.Transform(
@@ -1016,30 +1077,30 @@ _getObject = (baseUrl as text, objectName as text, langIndependentAttributes as 
         Result;
 
 // Exported function implementations
-getObject = (baseUrl as text, objectName as text, langIndependantAttributes as list, langDependantAttributes as list, optional repositoryId as text) =>
-    _getObject(baseUrl, objectName, langIndependantAttributes, langDependantAttributes, "DEFAULT", null, null, repositoryId);
+getObject = (baseUrl as text, language as text, objectName as text, langIndependantAttributes as list, langDependantAttributes as list, optional repositoryId as text) =>
+    _getObject(baseUrl, language, objectName, langIndependantAttributes, langDependantAttributes, "DEFAULT", null, null, repositoryId);
 
-getObjectWithName = (baseUrl as text, objectName as text, langIndependentAttributes as list, langDependentAttributes as list, optional repositoryId as text) =>
-    _getObject(baseUrl, objectName, langIndependentAttributes, langDependentAttributes, "WITH_NAME", null, null, repositoryId);
+getObjectWithName = (baseUrl as text, language as text, objectName as text, langIndependentAttributes as list, langDependentAttributes as list, optional repositoryId as text) =>
+    _getObject(baseUrl, language, objectName, langIndependentAttributes, langDependentAttributes, "WITH_NAME", null, null, repositoryId);
 
-getObjectWithNameDelimiter = (baseUrl as text, objectName as text, langIndependentAttributes as list, langDependentAttributes as list, delimiter, optional repositoryId as text) =>
-    _getObject(baseUrl, objectName, langIndependentAttributes, langDependentAttributes, "WITH_NAME_DELIMITER", delimiter, null, repositoryId);
+getObjectWithNameDelimiter = (baseUrl as text, language as text, objectName as text, langIndependentAttributes as list, langDependentAttributes as list, delimiter, optional repositoryId as text) =>
+    _getObject(baseUrl, language, objectName, langIndependentAttributes, langDependentAttributes, "WITH_NAME_DELIMITER", delimiter, null, repositoryId);
 
-getObjectWithType = (baseUrl as text, objectName as text, langIndependentAttributes as list, langDependentAttributes as list, optional repositoryId as text) =>
-    _getObject(baseUrl, objectName, langIndependentAttributes, langDependentAttributes, "WITH_TYPE", null, null, repositoryId);
+getObjectWithType = (baseUrl as text, language as text, objectName as text, langIndependentAttributes as list, langDependentAttributes as list, optional repositoryId as text) =>
+    _getObject(baseUrl, language, objectName, langIndependentAttributes, langDependentAttributes, "WITH_TYPE", null, null, repositoryId);
 
-getObjectWithTypeAndRelationDirection = (baseUrl as text, objectName as text, langIndependentAttributes as list, langDependentAttributes as list, relationDirection as text, optional repositoryId as text) =>
-    _getObject(baseUrl, objectName, langIndependentAttributes, langDependentAttributes, "WITH_TYPE", null, relationDirection, repositoryId);
+getObjectWithTypeAndRelationDirection = (baseUrl as text, language as text, objectName as text, langIndependentAttributes as list, langDependentAttributes as list, relationDirection as text, optional repositoryId as text) =>
+    _getObject(baseUrl, language, objectName, langIndependentAttributes, langDependentAttributes, "WITH_TYPE", null, relationDirection, repositoryId);
 
-_getRelationTable = (baseUrl as text, objectA as text, relationName as text, objectB as text, relationDirection as text, optional repositoryId as text) =>
+_getRelationTable = (baseUrl as text, language as text, objectA as text, relationName as text, objectB as text, relationDirection as text, optional repositoryId as text) =>
     let
         ClassA = if relationDirection = "INCOMING" then
-                     getObjectWithTypeAndRelationDirection(baseUrl, objectA, {relationName}, {}, "INCOMING", repositoryId)
+                     getObjectWithTypeAndRelationDirection(baseUrl, language, objectA, {relationName}, {}, "INCOMING", repositoryId)
                  else if relationDirection = "OUTGOING" then
-                     getObjectWithTypeAndRelationDirection(baseUrl, objectA, {relationName}, {}, "OUTGOING", repositoryId)
+                     getObjectWithTypeAndRelationDirection(baseUrl, language, objectA, {relationName}, {}, "OUTGOING", repositoryId)
                  else
-                     getObjectWithType(baseUrl, objectA, {relationName}, {}, repositoryId),
-        ClassB = getObjectWithType(baseUrl, objectB, {"NAME"}, {}, repositoryId),
+                     getObjectWithType(baseUrl, language, objectA, {relationName}, {}, repositoryId),
+        ClassB = getObjectWithType(baseUrl, language, objectB, {"NAME"}, {}, repositoryId),
         ClassAName = if not Table.IsEmpty(ClassA) and Table.HasColumns(ClassA, "Type") then Text.From(Table.First(ClassA)[Type]) else objectA,
         ClassBName = if not Table.IsEmpty(ClassB) and Table.HasColumns(ClassB, "Type") then Text.From(Table.First(ClassB)[Type]) else objectB,
         RelationColumns = List.RemoveItems(Table.ColumnNames(ClassA), {"Type", "ID"}),
@@ -1065,14 +1126,14 @@ _getRelationTable = (baseUrl as text, objectA as text, relationName as text, obj
     in
         Result;
 
-getRelationTable = (baseUrl as text, objectA as text, relationName as text, objectB as text, optional repositoryId as text) =>
-    _getRelationTable(baseUrl, objectA, relationName, objectB, "BOTH", repositoryId);
+getRelationTable = (baseUrl as text, language as text, objectA as text, relationName as text, objectB as text, optional repositoryId as text) =>
+    _getRelationTable(baseUrl, language, objectA, relationName, objectB, "BOTH", repositoryId);
 
-getRelationTableIncoming = (baseUrl as text, objectA as text, relationName as text, objectB as text, optional repositoryId as text) =>
-    _getRelationTable(baseUrl, objectA, relationName, objectB, "INCOMING", repositoryId);
+getRelationTableIncoming = (baseUrl as text, language as text, objectA as text, relationName as text, objectB as text, optional repositoryId as text) =>
+    _getRelationTable(baseUrl, language, objectA, relationName, objectB, "INCOMING", repositoryId);
 
-getRelationTableOutgoing = (baseUrl as text, objectA as text, relationName as text, objectB as text, optional repositoryId as text) =>
-    _getRelationTable(baseUrl, objectA, relationName, objectB, "OUTGOING", repositoryId);
+getRelationTableOutgoing = (baseUrl as text, language as text, objectA as text, relationName as text, objectB as text, optional repositoryId as text) =>
+    _getRelationTable(baseUrl, language, objectA, relationName, objectB, "OUTGOING", repositoryId);
 
 // Data Source Kind description
 BOCADONISADOITConnector = [
@@ -1116,14 +1177,54 @@ OAuth.GetFieldIgnoreCase = (recordValue as any, fieldName as text) as any =>
     in
         if matchingField = null then null else Record.Field(recordValue, matchingField);
 
-OAuth.ParseTokenResponse = (tokenResponse as binary, errorReason as text) as record =>
+// Read a field from a stored OAuth credential. The advanced Refresh callback
+// normally receives the flat record returned by FinishLogin, but a credential
+// coming back through Extension.CurrentCredential carries the connector's own
+// fields nested under Properties, so look in both places.
+OAuth.GetCredentialField = (credential as any, fieldName as text) as any =>
     let
-        responseMetadata = Value.Metadata(tokenResponse),
+        direct = OAuth.GetFieldIgnoreCase(credential, fieldName),
+        properties = OAuth.GetFieldIgnoreCase(credential, "Properties"),
+        nested = if direct = null then OAuth.GetFieldIgnoreCase(properties, fieldName) else null
+    in
+        if direct <> null then direct else nested;
+
+// Secrets must never be written into an error message or a trace in full. A
+// length and a short prefix are enough to tell whether the right value was sent
+// and whether it changed between two calls.
+OAuth.Redact = (value as any) as text =>
+    if value = null then
+        "<missing>"
+    else
+        let
+            asText = Text.From(value)
+        in
+            if Text.Trim(asText) = ""
+            then "<empty>"
+            else "len=" & Text.From(Text.Length(asText)) & " prefix=" & Text.Start(asText, 6);
+
+OAuth.ParseTokenResponse = (tokenResponse as binary, errorReason as text, optional requestDiagnostics as nullable record) as record =>
+    let
+        // The response body is a forward-only stream. This function inspects it
+        // twice - once for the metadata, once for the JSON - so it has to be
+        // buffered first, otherwise the second read sees nothing and reports a
+        // valid token response as empty.
+        bufferedResponse = Binary.Buffer(tokenResponse),
+        bufferedLength = try Binary.Length(bufferedResponse) otherwise 0,
+        // Reading the metadata is written to depend on the buffered value so it
+        // cannot be evaluated before the body has been materialised. M orders
+        // let bindings by dependency, not by the order they are written in.
+        responseMetadata = if bufferedLength >= 0 then Value.Metadata(tokenResponse) else [],
         responseStatusValue = Record.FieldOrDefault(responseMetadata, "Response.Status", 200),
         responseStatus = try Number.From(responseStatusValue) otherwise 200,
         responseHeadersValue = Record.FieldOrDefault(responseMetadata, "Headers", []),
         responseHeaders = if Value.Is(responseHeadersValue, type record) then responseHeadersValue else [],
-        parsedResponse = try Json.Document(tokenResponse),
+        // An empty body is a real case here: these servers report OAuth errors
+        // in the response headers and send no payload at all.
+        parsedResponse =
+            if bufferedLength = 0
+            then [HasError = true, Value = null]
+            else try Json.Document(bufferedResponse),
         responseObject =
             if parsedResponse[HasError] then
                 []
@@ -1152,18 +1253,33 @@ OAuth.ParseTokenResponse = (tokenResponse as binary, errorReason as text) as rec
                 Text.From(errorCode)
             else if responseStatus >= 400 then
                 "The token endpoint rejected the request (HTTP " & Text.From(responseStatus) & ")."
+            else if bufferedLength = 0 then
+                "The token endpoint returned HTTP " & Text.From(responseStatus) & " with an empty body."
             else
-                "The token endpoint returned an empty or non-JSON response.",
+                // Include the start of the payload: if this ever fires again the
+                // message should say what actually came back instead of guessing.
+                "The token endpoint returned HTTP " & Text.From(responseStatus) &
+                " with a body that is not valid JSON: " &
+                (try Text.Start(Text.FromBinary(bufferedResponse), 200) otherwise "<unreadable>"),
+        // Everything known about the exchange travels with the error. The token
+        // endpoint often sends only an error code, so the response headers and
+        // body are usually the only way to tell why a grant was refused.
+        diagnostics =
+            (if requestDiagnostics = null then [] else requestDiagnostics) & [
+                Status = responseStatus,
+                ResponseHeaders = responseHeaders,
+                ResponseBody =
+                    if bufferedLength = 0
+                    then "<empty>"
+                    else (try Text.Start(Text.FromBinary(bufferedResponse), 2000) otherwise "<unreadable>")
+            ],
         result =
             if responseStatus >= 400 or errorCode <> null then
-                error Error.Record(errorReason, errorDescription, [
-                    Status = responseStatus,
-                    OAuthError = errorCode
-                ])
+                error Error.Record(errorReason, errorDescription, diagnostics & [OAuthError = errorCode])
             else if parsedResponse[HasError] then
-                error Error.Record(errorReason, errorDescription, [Status = responseStatus])
+                error Error.Record(errorReason, errorDescription, diagnostics)
             else if not Record.HasFields(responseObject, "access_token") then
-                error Error.Record(errorReason, "The token endpoint did not return an access token.", [Status = responseStatus])
+                error Error.Record(errorReason, "The token endpoint did not return an access token.", diagnostics)
             else
                 responseObject
     in
@@ -1229,28 +1345,32 @@ FinishLogin = (context, callbackUri, state) =>
                                 Headers = [
                                     #"Content-Type" = "application/x-www-form-urlencoded",
                                     #"Accept" = "application/json"
-                                ]
-                                //ManualStatusHandling = {400, 401, 403, 404, 500}
+                                ],
+                                ManualStatusHandling = {400, 401, 403}
                             ]),
-        
-        responseObj = Json.Document(tokenResponse),
-        
-        // Check for error in response
-        result = if (Record.HasFields(responseObj, "error")) then
-                    error Error.Record("OAuth Error", responseObj[error], responseObj)
-                 else
-                    // The advanced refresh callback receives this complete
-                    // record, which lets it reuse the original PKCE verifier.
-                    if Record.HasFields(responseObj, "code_verifier") then
-                        responseObj
-                    else
-                        Record.AddField(responseObj, "code_verifier", context[code_verifier])
+
+        // Share the token-response parser with Refresh so a failed sign-in
+        // reports the server's OAuth error instead of a buffer-length error.
+        parsedResponse = OAuth.ParseTokenResponse(tokenResponse, "OAuth Error"),
+
+        // The returned record is the credential Power Query stores and hands to
+        // the advanced Refresh callback as oldCredential. PKCE applies to the
+        // refresh grant too, so the verifier is kept alongside the tokens - the
+        // server has no other way to receive it once this login window closes.
+        result =
+            if Record.HasFields(parsedResponse, "code_verifier") then
+                parsedResponse
+            else
+                Record.AddField(parsedResponse, "code_verifier", context[code_verifier])
     in
         result;
 
 // The advanced Power Query callback provides the complete credential returned
-// by FinishLogin (or the previous refresh). ADOIT/ADONIS public clients need the
-// original PKCE verifier in addition to the refresh token and client ID.
+// by FinishLogin (or the previous refresh).
+//
+// The refresh grant sends grant_type and refresh_token, plus - because ADOXX
+// keeps PKCE in force for this grant - the client_id and code_verifier that a
+// public client used for the authorization-code exchange.
 Refresh = (clientApplication, resourceUrl, oldCredential) =>
     let
         dataSourcePath = Json.Document(resourceUrl),
@@ -1258,7 +1378,7 @@ Refresh = (clientApplication, resourceUrl, oldCredential) =>
         configuredClientId = Record.FieldOrDefault(dataSourcePath, "client_id", null),
         effectiveClientId = if configuredClientId = null or Text.Trim(configuredClientId) = "" then default_client_id else configuredClientId,
         baseUrlWithSlash = if Text.EndsWith(baseUrl, "/") then baseUrl else baseUrl & "/",
-        refreshTokenValue = Record.FieldOrDefault(oldCredential, "refresh_token", null),
+        refreshTokenValue = OAuth.GetCredentialField(oldCredential, "refresh_token"),
         refreshToken =
             if refreshTokenValue = null or Text.Trim(Text.From(refreshTokenValue)) = "" then
                 error Error.Record(
@@ -1268,22 +1388,30 @@ Refresh = (clientApplication, resourceUrl, oldCredential) =>
                 )
             else
                 Text.From(refreshTokenValue),
-        codeVerifierValue = Record.FieldOrDefault(oldCredential, "code_verifier", null),
+        // PKCE stays in force for the refresh grant: the ADOXX documentation
+        // says of the refresh request that "all the rest (client registration,
+        // PKCE, error handling etc.) are the same", and a public client's code
+        // exchange carries both client_id and code_verifier. Omitting the
+        // verifier here makes the token endpoint answer invalid_grant.
+        codeVerifierValue = OAuth.GetCredentialField(oldCredential, "code_verifier"),
         codeVerifier =
             if codeVerifierValue = null or Text.Trim(Text.From(codeVerifierValue)) = "" then
-                error Error.Record(
-                    "OAuth Refresh Error",
-                    "No PKCE verifier is stored for this credential. Clear the data-source permissions and sign in again.",
-                    null
-                )
+                null
             else
                 Text.From(codeVerifierValue),
-        queryParams = Uri.BuildQueryString([
+        baseParams = [
             grant_type = "refresh_token",
             refresh_token = refreshToken,
-            client_id = effectiveClientId,
-            code_verifier = codeVerifier
-        ]),
+            client_id = effectiveClientId
+        ],
+        // Missing verifier is not failed here: the request is still worth
+        // attempting, and the server's own error is more informative than a
+        // guess made locally.
+        sentParams =
+            if codeVerifier = null
+            then baseParams
+            else Record.AddField(baseParams, "code_verifier", codeVerifier),
+        queryParams = Uri.BuildQueryString(sentParams),
         tokenUrl = baseUrlWithSlash & "oauth2/token?" & queryParams,
         tokenResponse = Web.Contents(tokenUrl, [
             Content = Text.ToBinary(""),
@@ -1293,17 +1421,37 @@ Refresh = (clientApplication, resourceUrl, oldCredential) =>
             ],
             ManualStatusHandling = {400, 401, 403}
         ]),
-        responseObj = OAuth.ParseTokenResponse(tokenResponse, "OAuth Refresh Error"),
-        responseWithRefreshToken =
+        requestDiagnostics = [
+            TokenEndpoint = baseUrlWithSlash & "oauth2/token",
+            SentParameters = Text.Combine(Record.FieldNames(sentParams), ", "),
+            ClientId = effectiveClientId,
+            SentRefreshToken = OAuth.Redact(refreshToken),
+            SentCodeVerifier = OAuth.Redact(codeVerifier)
+        ],
+        responseObj = OAuth.ParseTokenResponse(tokenResponse, "OAuth Refresh Error", requestDiagnostics),
+
+        // Note for future debugging: Diagnostics.Trace calls placed here do not
+        // reach the Power BI Desktop mashup logs. Refresh runs in the credential
+        // service rather than in a query evaluation container, and its traces do
+        // not land in Traces\*.log even at Information level. Diagnose this path
+        // through the error record below, or with an HTTP proxy.
+        //
+        // The token endpoint is not documented as rotating refresh tokens, so a
+        // response without one keeps the existing token alive for the next cycle.
+        withRefreshToken =
             if Record.HasFields(responseObj, "refresh_token") then
                 responseObj
             else
                 Record.AddField(responseObj, "refresh_token", refreshToken),
+        // This record becomes the credential the next refresh receives, so the
+        // verifier has to be carried forward or only the first refresh works.
         result =
-            if Record.HasFields(responseWithRefreshToken, "code_verifier") then
-                Record.TransformFields(responseWithRefreshToken, {{"code_verifier", each codeVerifier}})
+            if codeVerifier = null then
+                withRefreshToken
+            else if Record.HasFields(withRefreshToken, "code_verifier") then
+                Record.TransformFields(withRefreshToken, {{"code_verifier", each codeVerifier}})
             else
-                Record.AddField(responseWithRefreshToken, "code_verifier", codeVerifier)
+                Record.AddField(withRefreshToken, "code_verifier", codeVerifier)
     in
         result;
 
@@ -1326,9 +1474,9 @@ BOCADONISADOITConnector.Icons = [
 searchRequestStepSize = 1000;
 
 // Create a search job 
-createSearchJob = (baseUrl as text, objectName as text, attributes as list, relationDirection as text, optional repositoryId as text) =>
+createSearchJob = (baseUrl as text, language as text, objectName as text, attributes as list, relationDirection as text, optional repositoryId as text) =>
     let
-        repoID = if repositoryId = null then getRepoID(baseUrl, 1) else repositoryId,
+        repoID = if repositoryId = null then getRepoID(baseUrl, language, 1) else repositoryId,
         
         // Build filters based on relation direction
         baseFilter = [className = objectName],
@@ -1359,7 +1507,7 @@ createSearchJob = (baseUrl as text, objectName as text, attributes as list, rela
             Content = Text.ToBinary(requestBody),
             Headers = [
                 #"Content-Type" = "application/json",
-                #"Accept-Language" = "en"
+                #"Accept-Language" = language
             ],
             RelativePath = "rest/4.0/repos/" & repoID & "/search/jobs"
             //ManualStatusHandling = {201, 400, 401, 403, 404, 500}
@@ -1383,12 +1531,12 @@ Function.WaitFor = (seconds as number) as logical =>
         delay;
 
 // Search for objects using a search job
-searchObjectWithJob = (baseUrl as text, objectName as text, attributes as list, relationDirection as text, optional repositoryId as text) =>
+searchObjectWithJob = (baseUrl as text, language as text, objectName as text, attributes as list, relationDirection as text, optional repositoryId as text) =>
     let
-        repoID = if repositoryId = null then getRepoID(baseUrl, 1) else repositoryId,
+        repoID = if repositoryId = null then getRepoID(baseUrl, language, 1) else repositoryId,
         
         // Create the search job
-        key = createSearchJob(baseUrl, objectName, attributes, relationDirection, repoID),
+        key = createSearchJob(baseUrl, language, objectName, attributes, relationDirection, repoID),
         
         // Add a 5-second delay
         waitResult = Function.WaitFor(5),
@@ -1396,6 +1544,7 @@ searchObjectWithJob = (baseUrl as text, objectName as text, attributes as list, 
         // First request to get the total number of hits
         responseForTotal = if waitResult then
                                Json.Document(Web.Contents(baseUrl, [
+                                   Headers = [#"Accept-Language" = language],
                                    RelativePath = "rest/4.0/repos/" & repoID & "/search/jobs/" & key,
                                    Query = [#"range-start" = "0", #"range-end" = "1"]
                                ]))
@@ -1420,7 +1569,7 @@ searchObjectWithJob = (baseUrl as text, objectName as text, attributes as list, 
                 start = range{0},
                 end = range{1},
                 response = Json.Document(Web.Contents(baseUrl, [
-                    Headers = [#"Accept-Language" = "en"],
+                    Headers = [#"Accept-Language" = language],
                     RelativePath = "rest/4.0/repos/" & repoID & "/search/jobs/" & key,
                     Query = [#"range-start" = Text.From(start), #"range-end" = Text.From(end)]
                 ])),
