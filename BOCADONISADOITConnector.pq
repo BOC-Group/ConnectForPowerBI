@@ -459,7 +459,7 @@ GetGenericClassFunction = (baseUrl as text, language as text) as function =>
                 Documentation.SampleValues = {"A_DESCRIPTION, A_VALID_FROM, RC_REALIZATION"}
             ]),
             optional repositoryId as (type text meta [
-                Documentation.FieldCaption = "Repository ID (optional)",
+                Documentation.FieldCaption = "Repository ID",
                 Documentation.FieldDescription = "Leave empty to use the first available repository."
             ])
         ) as table,
@@ -486,10 +486,11 @@ GetEndUserRelationFunction = (baseUrl as text, language as text) as function =>
             ]),
             optional direction as (type text meta [
                 Documentation.FieldCaption = "Direction",
+                Documentation.FieldDescription = "Which way the relation is followed, from the source class to the target class. OUTGOING keeps relations that point from the source to the target, INCOMING keeps those pointing back, and BOTH applies no direction filter. Leave empty to use BOTH.",
                 Documentation.AllowedValues = {"BOTH", "INCOMING", "OUTGOING"}
             ]),
             optional repositoryId as (type text meta [
-                Documentation.FieldCaption = "Repository ID (optional)",
+                Documentation.FieldCaption = "Repository ID",
                 Documentation.FieldDescription = "Leave empty to use the first available repository."
             ])
         ) as table,
@@ -585,7 +586,7 @@ GetSavedSearchesFunction = (baseUrl as text, language as text) as function =>
                 result,
         functionType = type function (
             optional repositoryId as (type text meta [
-                Documentation.FieldCaption = "Repository ID (optional)",
+                Documentation.FieldCaption = "Repository ID",
                 Documentation.FieldDescription = "Leave empty to use the first available repository."
             ]),
             optional scope as (type text meta [
@@ -743,7 +744,7 @@ GetExecuteSavedSearchFunction = (baseUrl as text, language as text) as function 
                 Documentation.SampleValues = {"b1e7a5c3-9d24-4f18-8a6e-3c72d0f41b95"}
             ]),
             optional repositoryId as (type text meta [
-                Documentation.FieldCaption = "Repository ID (optional)",
+                Documentation.FieldCaption = "Repository ID",
                 Documentation.FieldDescription = "Leave empty to use the first available repository."
             ]),
             optional attributes as (type text meta [
