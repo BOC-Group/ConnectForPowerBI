@@ -133,7 +133,31 @@ GetReposList = (baseUrl as text, language as text) =>
 ObjectsInRepoNavigationTable = (baseUrl as text, language as text, repoId as text, repoName as text) =>
     let
         dynamicClasses = GetDynamicObjectClassRows(baseUrl, language, repoId),
-        result = Table.ToNavigationTable(dynamicClasses, {"Key"}, "Name", "Data", "ItemKind", "ItemName", "IsLeaf")
+        // Models are added as a folder next to the class leaves rather than as a
+        // level above them, so the keys existing reports navigate to stay valid.
+        modelTypesFolder = #table(
+            {"Name", "Key", "Data", "ItemKind", "ItemName", "IsLeaf"},
+            {
+                {
+                    "Models",
+                    "models_" & repoId,
+                    ModelsInRepoNavigationTable(baseUrl, language, repoId),
+                    "Folder",
+                    "Folder",
+                    false
+                }
+            }
+        ),
+        combined = Table.Combine({modelTypesFolder, dynamicClasses}),
+        result = Table.ToNavigationTable(combined, {"Key"}, "Name", "Data", "ItemKind", "ItemName", "IsLeaf")
+    in
+        result;
+
+// Get models for a specific repository, grouped by model type.
+ModelsInRepoNavigationTable = (baseUrl as text, language as text, repoId as text) =>
+    let
+        dynamicModelTypes = GetDynamicModelTypeRows(baseUrl, language, repoId),
+        result = Table.ToNavigationTable(dynamicModelTypes, {"Key"}, "Name", "Data", "ItemKind", "ItemName", "IsLeaf")
     in
         result;
 
@@ -144,6 +168,10 @@ ObjectsInRepoNavigationTable = (baseUrl as text, language as text, repoId as tex
 // translation out of a metamodel displayNames record.
 default_language = "en";
 supported_languages = {"en", "de", "es", "fr"};
+
+// Metanames arrive prefixed by artefact kind: C_ for classes, MT_ for model
+// types. Both are stripped when a readable label has to be derived from them.
+technical_metamodel_prefixes = {"C_", "MT_"};
 
 // An unset or unrecognised value falls back to English rather than failing, so
 // an existing report keeps refreshing if it was built before this option
@@ -192,14 +220,20 @@ GetHumanReadableClassName = (classRecord as record, fallbackMetaName as text, la
             each Value.Is(_, type text) and Text.Trim(_) <> ""
         ),
         metamodelName = List.First(candidates, null),
+        technicalPrefix = List.First(
+            List.Select(technical_metamodel_prefixes, each Text.StartsWith(fallbackMetaName, _)),
+            null
+        ),
         looksTechnical =
             metamodelName = null or
             metamodelName = fallbackMetaName or
-            (Text.StartsWith(metamodelName, "C_") and Text.Upper(metamodelName) = metamodelName),
+            (List.AnyTrue(
+                List.Transform(technical_metamodel_prefixes, each Text.StartsWith(metamodelName, _))
+             ) and Text.Upper(metamodelName) = metamodelName),
         fallbackWithoutPrefix =
-            if Text.StartsWith(fallbackMetaName, "C_")
-            then Text.Range(fallbackMetaName, 2)
-            else fallbackMetaName,
+            if technicalPrefix = null
+            then fallbackMetaName
+            else Text.Range(fallbackMetaName, Text.Length(technicalPrefix)),
         readableFallback = Text.Proper(Text.Replace(fallbackWithoutPrefix, "_", " ")),
         result = if looksTechnical then readableFallback else Text.Trim(metamodelName)
     in
@@ -209,6 +243,9 @@ GetHumanReadableClassName = (classRecord as record, fallbackMetaName as text, la
 // Navigator rather than to an internal connector implementation function.
 GetLoadClassExample = (classMetaName as text, attributesAndRelations as text) as text =>
     "#""Load Class by Technical Name""(""" & classMetaName & """, """ & attributesAndRelations & """)";
+
+GetLoadModelTypeExample = (modelTypeMetaName as text, attributesAndRelations as text) as text =>
+    "#""Load Model by Technical Name""(""" & modelTypeMetaName & """, """ & attributesAndRelations & """)";
 
 // REST 4 exposes class lookup as a collection endpoint without a name query
 // parameter. Resolve technical names locally so products that ignore unknown
@@ -257,6 +294,49 @@ IsVisibleConcreteClass = (classRecord as record) as logical =>
     in
         isVisible and not isAbstract and hasIdentity;
 
+// Model types are described by the same record shape as classes, so their
+// metaname is read with GetClassMetaName. The collection itself is read
+// defensively for the same reason: metamodel field spellings vary between
+// product generations.
+GetModelTypeList = (metamodelResponse as record) as list =>
+    let
+        candidates = {
+            Record.FieldOrDefault(metamodelResponse, "modeltypes", null),
+            Record.FieldOrDefault(metamodelResponse, "modelTypes", null)
+        },
+        lists = List.Select(candidates, each Value.Is(_, type list))
+    in
+        List.First(lists, {});
+
+// The modeltype collection reports no abstract flag, so visibility and identity
+// are all that gate a model type.
+IsVisibleModelType = (modelTypeRecord as record) as logical =>
+    let
+        isVisible = Record.FieldOrDefault(modelTypeRecord, "visible", false) = true,
+        hasIdentity =
+            GetClassMetaName(modelTypeRecord) <> null and
+            Record.FieldOrDefault(modelTypeRecord, "id", null) <> null
+    in
+        isVisible and hasIdentity;
+
+// Resolved locally for the same reason as ResolveClassByMetaName: the model type
+// collection endpoint takes no name query parameter.
+ResolveModelTypeByMetaName = (baseUrl as text, language as text, modelTypeName as text) as nullable record =>
+    let
+        modelTypesResponse = getRequest(baseUrl, language, getBaseURL(baseUrl) & "metamodel/modeltypes/"),
+        modelTypes = List.Select(GetModelTypeList(modelTypesResponse), each Value.Is(_, type record)),
+        requestedName = Text.Upper(Text.Trim(modelTypeName)),
+        matches = List.Select(
+            modelTypes,
+            each
+                let
+                    metaName = GetClassMetaName(_)
+                in
+                    metaName <> null and Text.Upper(metaName) = requestedName
+        )
+    in
+        List.First(matches, null);
+
 // Build navigation rows from the classes configured in the customer's metamodel.
 GetDynamicObjectClassRows = (baseUrl as text, language as text, repoId as text) as table =>
     let
@@ -284,6 +364,37 @@ GetDynamicObjectClassRows = (baseUrl as text, language as text, repoId as text) 
             classEntries
         ),
         result = Table.Sort(classTable, {{"Name", Order.Ascending}})
+    in
+        result;
+
+// Build navigation rows from the model types configured in the customer's
+// metamodel, mirroring GetDynamicObjectClassRows.
+GetDynamicModelTypeRows = (baseUrl as text, language as text, repoId as text) as table =>
+    let
+        modelTypesResponse = getRequest(baseUrl, language, getBaseURL(baseUrl) & "metamodel/modeltypes/"),
+        modelTypes = List.Select(GetModelTypeList(modelTypesResponse), each Value.Is(_, type record)),
+        visibleModelTypes = List.Select(modelTypes, each IsVisibleModelType(_)),
+        modelTypeEntries = List.Transform(
+            visibleModelTypes,
+            (modelTypeRecord as record) =>
+                let
+                    metaName = Text.From(GetClassMetaName(modelTypeRecord)),
+                    displayName = GetHumanReadableClassName(modelTypeRecord, metaName, language)
+                in
+                    {
+                        displayName,
+                        metaName & "_" & repoId,
+                        GetModelTypeFieldSelectionFunction(baseUrl, language, metaName, displayName, repoId),
+                        "Function",
+                        "Function",
+                        true
+                    }
+        ),
+        modelTypeTable = #table(
+            {"Name", "Key", "Data", "ItemKind", "ItemName", "IsLeaf"},
+            modelTypeEntries
+        ),
+        result = Table.Sort(modelTypeTable, {{"Name", Order.Ascending}})
     in
         result;
 
@@ -340,6 +451,34 @@ GetClassFieldSelectionFunction = (baseUrl as text, language as text, objectClass
     in
         result;
 
+// Model leaves mirror the repository class leaves: a function, so the requested
+// field list stays visible and editable in the generated M query.
+GetModelTypeFieldSelectionFunction = (baseUrl as text, language as text, modelTypeName as text, displayName as text, repoId as text) as function =>
+    let
+        implementation = (optional attributesAndRelations as nullable text) as table =>
+            let
+                requestedFields = List.Distinct({"NAME"} & ParseCommaSeparatedNames(attributesAndRelations)),
+                models = getModelWithNameDelimiter(baseUrl, language, modelTypeName, requestedFields, {}, "; ", repoId),
+                result =
+                    if Table.IsEmpty(models)
+                    then #table(
+                        {"Information"},
+                        {{"No '" & displayName & "' models were found in repository '" & repoId & "'."}}
+                    )
+                    else models
+            in
+                result,
+        functionType = type function (
+            optional attributesAndRelations as (type nullable text meta [
+                Documentation.FieldCaption = "Attributes and relations (comma-separated)",
+                Documentation.FieldDescription = "Optional comma-separated technical names to load. Leave empty to load only NAME and ID.",
+                Documentation.SampleValues = {"A_DESCRIPTION, A_VERSION_NUMBER"}
+            ])
+        ) as table,
+        result = Value.ReplaceType(implementation, functionType)
+    in
+        result;
+
 // Add one mapping table per class so report authors can discover the technical
 // attribute and relation names required by the custom query functions.
 RelationAndAttributeNamesNavigationTable = (baseUrl as text, language as text) as table =>
@@ -369,13 +508,64 @@ RelationAndAttributeNamesNavigationTable = (baseUrl as text, language as text) a
             classEntries
         ),
         sortedTable = Table.Sort(classTable, {{"Name", Order.Ascending}}),
+        // The model type tables sit in their own folder so the class tables keep
+        // the keys older reports navigate to.
+        modelTypesFolder = #table(
+            {"Name", "Key", "Data", "ItemKind", "ItemName", "IsLeaf"},
+            {
+                {
+                    "Models",
+                    "metamodel_names_models",
+                    ModelTypeRelationAndAttributeNamesNavigationTable(baseUrl, language),
+                    "Folder",
+                    "Folder",
+                    false
+                }
+            }
+        ),
+        combined = Table.Combine({modelTypesFolder, sortedTable}),
+        result = Table.ToNavigationTable(combined, {"Key"}, "Name", "Data", "ItemKind", "ItemName", "IsLeaf")
+    in
+        result;
+
+// The same mapping tables, one per model type.
+ModelTypeRelationAndAttributeNamesNavigationTable = (baseUrl as text, language as text) as table =>
+    let
+        modelTypesResponse = getRequest(baseUrl, language, getBaseURL(baseUrl) & "metamodel/modeltypes/"),
+        modelTypes = List.Select(GetModelTypeList(modelTypesResponse), each Value.Is(_, type record)),
+        visibleModelTypes = List.Select(modelTypes, each IsVisibleModelType(_)),
+        modelTypeEntries = List.Transform(
+            visibleModelTypes,
+            (modelTypeRecord as record) =>
+                let
+                    modelTypeId = Text.From(modelTypeRecord[id]),
+                    metaName = Text.From(GetClassMetaName(modelTypeRecord)),
+                    displayName = GetHumanReadableClassName(modelTypeRecord, metaName, language)
+                in
+                    {
+                        displayName & " - A/R",
+                        "metamodel_names_" & metaName,
+                        GetModelTypeRelationAndAttributeNames(baseUrl, language, modelTypeId, metaName),
+                        "Table",
+                        "Table",
+                        true
+                    }
+        ),
+        modelTypeTable = #table(
+            {"Name", "Key", "Data", "ItemKind", "ItemName", "IsLeaf"},
+            modelTypeEntries
+        ),
+        sortedTable = Table.Sort(modelTypeTable, {{"Name", Order.Ascending}}),
         result = Table.ToNavigationTable(sortedTable, {"Key"}, "Name", "Data", "ItemKind", "ItemName", "IsLeaf")
     in
         result;
 
-GetClassRelationAndAttributeNames = (baseUrl as text, language as text, classId as text, classMetaName as text) as table =>
+// Class and model type notebooks share one response shape, so both mapping
+// tables are built here. exampleUsage turns a field metaname into the copy-ready
+// call for the Navigator function that loads the artefact.
+GetNotebookRelationAndAttributeNames = (baseUrl as text, language as text, notebookUrl as text, exampleUsage as function) as table =>
     let
-        notebookResponse = try getRequest(baseUrl, language, getBaseURL(baseUrl) & "metamodel/classes/" & classId & "/notebook/") otherwise [chapters = {}],
+        notebookResponse = try getRequest(baseUrl, language, notebookUrl) otherwise [chapters = {}],
         chapters = Record.FieldOrDefault(notebookResponse, "chapters", {}),
         notebookNodes = if Value.Is(chapters, type list) then FlattenNotebookNodes(chapters) else {},
         notebookItems = List.Select(
@@ -401,7 +591,7 @@ GetClassRelationAndAttributeNames = (baseUrl as text, language as text, classId 
                         kind,
                         metaName,
                         GetHumanReadableClassName(_, metaName, language),
-                        GetLoadClassExample(classMetaName, metaName)
+                        exampleUsage(metaName)
                     }
         ),
         mappingTable = #table(
@@ -413,6 +603,22 @@ GetClassRelationAndAttributeNames = (baseUrl as text, language as text, classId 
     in
         result;
 
+GetClassRelationAndAttributeNames = (baseUrl as text, language as text, classId as text, classMetaName as text) as table =>
+    GetNotebookRelationAndAttributeNames(
+        baseUrl,
+        language,
+        getBaseURL(baseUrl) & "metamodel/classes/" & classId & "/notebook/",
+        (fieldMetaName as text) as text => GetLoadClassExample(classMetaName, fieldMetaName)
+    );
+
+GetModelTypeRelationAndAttributeNames = (baseUrl as text, language as text, modelTypeId as text, modelTypeMetaName as text) as table =>
+    GetNotebookRelationAndAttributeNames(
+        baseUrl,
+        language,
+        getBaseURL(baseUrl) & "metamodel/modeltypes/" & modelTypeId & "/notebook/",
+        (fieldMetaName as text) as text => GetLoadModelTypeExample(modelTypeMetaName, fieldMetaName)
+    );
+
 // Create a navigation table for functions
 FunctionsNavigationTable = (baseUrl as text, language as text) =>
     let
@@ -421,12 +627,15 @@ FunctionsNavigationTable = (baseUrl as text, language as text) =>
             {"Name", "Key", "Data", "ItemKind", "ItemName", "IsLeaf"},
             {
                 {"Load Class by Technical Name", "load_class", GetGenericClassFunction(baseUrl, language), "Function", "Function", true},
+                {"Load Model by Technical Name", "load_model", GetGenericModelTypeFunction(baseUrl, language), "Function", "Function", true},
                 {"Load Relation Table", "load_relation", GetEndUserRelationFunction(baseUrl, language), "Function", "Function", true},
                 {"List Available Repositories", "available_repositories", GetAvailableRepositoriesFunction(baseUrl, language), "Function", "Function", true},
                 {"List Saved Searches", "saved_searches", GetSavedSearchesFunction(baseUrl, language), "Function", "Function", true},
                 {"Execute Saved Search", "execute_saved_search", GetExecuteSavedSearchFunction(baseUrl, language), "Function", "Function", true},
                 {"List Available Classes", "available_classes", GetAvailableClassesFunction(baseUrl, language), "Function", "Function", true},
-                {"List Class Notebook A/R", "class_notebook_fields", GetClassNotebookFieldsFunction(baseUrl, language), "Function", "Function", true}
+                {"List Available Models", "available_models", GetAvailableModelTypesFunction(baseUrl, language), "Function", "Function", true},
+                {"List Class Notebook A/R", "class_notebook_fields", GetClassNotebookFieldsFunction(baseUrl, language), "Function", "Function", true},
+                {"List Model Notebook A/R", "model_notebook_fields", GetModelTypeNotebookFieldsFunction(baseUrl, language), "Function", "Function", true}
             }
         ),
         
@@ -457,6 +666,39 @@ GetGenericClassFunction = (baseUrl as text, language as text) as function =>
                 Documentation.FieldCaption = "Attributes and relations (comma-separated)",
                 Documentation.FieldDescription = "Leave empty to load only NAME and ID.",
                 Documentation.SampleValues = {"A_DESCRIPTION, A_VALID_FROM, RC_REALIZATION"}
+            ]),
+            optional repositoryId as (type text meta [
+                Documentation.FieldCaption = "Repository ID",
+                Documentation.FieldDescription = "Leave empty to use the first available repository."
+            ])
+        ) as table,
+        result = Value.ReplaceType(implementation, functionType)
+    in
+        result;
+
+// Generic model loader for model types that are not exposed beneath a
+// repository in the Navigator.
+GetGenericModelTypeFunction = (baseUrl as text, language as text) as function =>
+    let
+        implementation = (modelTypeName as text, optional attributesAndRelations as nullable text, optional repositoryId as text) as table =>
+            let
+                effectiveRepoId =
+                    if repositoryId = null or Text.Trim(repositoryId) = ""
+                    then getRepoID(baseUrl, language, 1)
+                    else repositoryId,
+                loader = GetModelTypeFieldSelectionFunction(baseUrl, language, modelTypeName, modelTypeName, effectiveRepoId),
+                result = loader(attributesAndRelations)
+            in
+                result,
+        functionType = type function (
+            modelTypeName as (type text meta [
+                Documentation.FieldCaption = "Technical model name",
+                Documentation.SampleValues = {"MT_BUSINESS_PROCESS_DIAGRAM_BPMN_20"}
+            ]),
+            optional attributesAndRelations as (type nullable text meta [
+                Documentation.FieldCaption = "Attributes and relations (comma-separated)",
+                Documentation.FieldDescription = "Leave empty to load only NAME and ID.",
+                Documentation.SampleValues = {"A_DESCRIPTION, A_VERSION_NUMBER"}
             ]),
             optional repositoryId as (type text meta [
                 Documentation.FieldCaption = "Repository ID",
@@ -520,6 +762,33 @@ GetClassNotebookFieldsFunction = (baseUrl as text, language as text) as function
             className as (type text meta [
                 Documentation.FieldCaption = "Technical class name",
                 Documentation.SampleValues = {"C_APPLICATION_COMPONENT"}
+            ])
+        ) as table,
+        result = Value.ReplaceType(implementation, functionType)
+    in
+        result;
+
+// The model counterpart of List Class Notebook A/R.
+GetModelTypeNotebookFieldsFunction = (baseUrl as text, language as text) as function =>
+    let
+        implementation = (modelTypeName as text) as table =>
+            let
+                modelTypeRecord = try ResolveModelTypeByMetaName(baseUrl, language, modelTypeName) otherwise null,
+                result =
+                    if modelTypeRecord = null
+                    then #table({"Message"}, {{"Model '" & modelTypeName & "' was not found."}})
+                    else
+                        let
+                            resolvedMetaNameValue = GetClassMetaName(modelTypeRecord),
+                            resolvedMetaName = if resolvedMetaNameValue = null then modelTypeName else resolvedMetaNameValue
+                        in
+                            GetModelTypeRelationAndAttributeNames(baseUrl, language, Text.From(modelTypeRecord[id]), resolvedMetaName)
+            in
+                result,
+        functionType = type function (
+            modelTypeName as (type text meta [
+                Documentation.FieldCaption = "Technical model name",
+                Documentation.SampleValues = {"MT_BUSINESS_PROCESS_DIAGRAM_BPMN_20"}
             ])
         ) as table,
         result = Value.ReplaceType(implementation, functionType)
@@ -622,9 +891,12 @@ NormalizeSearchItem = (item as record) as record =>
             List.Select(attributes & relations, each Value.Is(_, type record)),
             each Record.SelectFields(_, {"name", "metaName", "attrType", "value", "targets"}, MissingField.UseNull)
         ),
+        // modelId and modelName only come back for modelling instances
+        // (artefactType MODINST). MissingField.UseNull pads them for every other
+        // hit, so the shared processor can expand them unconditionally.
         identity = Record.SelectFields(
             item,
-            {"rest_links", "id", "name", "type", "artefactType", "metaName", "link", "icon"},
+            {"rest_links", "id", "name", "type", "artefactType", "metaName", "link", "icon", "modelId", "modelName"},
             MissingField.UseNull
         ),
         result = identity & [attributes = searchFields]
@@ -826,6 +1098,40 @@ GetAvailableClassesFunction = (baseUrl as text, language as text) =>
         in
             resultTable;
 
+// Function to get available model types
+GetAvailableModelTypesFunction = (baseUrl as text, language as text) =>
+    () =>
+        let
+            metaModelUrl = getBaseURL(baseUrl) & "metamodel/modeltypes/",
+            metaModelResponse = getRequest(baseUrl, language, metaModelUrl),
+            modelTypes = List.Select(GetModelTypeList(metaModelResponse), each Value.Is(_, type record)),
+            visibleModelTypes = List.Select(modelTypes, each IsVisibleModelType(_)),
+
+            modelTypeRows = List.Transform(
+                visibleModelTypes,
+                (modelTypeRecord as record) =>
+                    let
+                        metaName = Text.From(GetClassMetaName(modelTypeRecord))
+                    in
+                        [
+                            MetaName = metaName,
+                            ModelName = GetHumanReadableClassName(modelTypeRecord, metaName, language)
+                        ]
+            ),
+            modelTypeTable = Table.FromRecords(
+                modelTypeRows,
+                type table [MetaName = text, ModelName = text]
+            ),
+
+            // Add example usage column
+            modelTypesWithExamples = Table.AddColumn(modelTypeTable, "Example Usage",
+                each GetLoadModelTypeExample([MetaName], "NAME"), type text),
+
+            // Reorder and select columns for display
+            resultTable = Table.SelectColumns(modelTypesWithExamples, {"MetaName", "ModelName", "Example Usage"})
+        in
+            resultTable;
+
 // Function to get available attributes for a class
 GetClassAttributesFunction = (baseUrl as text, language as text) =>
     (className as text) =>
@@ -971,17 +1277,31 @@ getRepoID = (baseUrl as text, language as text, repoIndex as number) =>
     in
         result;
 
-searchObject = (baseUrl as text, language as text, objectName as text, optional repositoryId as text) =>
+// Query scopes as defined by https://developer.boc-group.com/adoxx/en/queries.
+// A class search covers repository objects and modelling objects, a model type
+// search covers models. Keeping the two apart is what makes a Navigator leaf
+// return only the artefact kind it is named after.
+search_scope_models = "MODELS";
+
+SearchScopeJson = (searchScope as nullable text) as text =>
+    if searchScope = search_scope_models
+    then "{""models"":true}"
+    else "{""repoObjects"":true,""modObjects"":true}";
+
+searchObject = (baseUrl as text, language as text, objectName as text, optional repositoryId as text, optional searchScope as text) =>
     let
         repoID = if repositoryId = null then getRepoID(baseUrl, language, 1) else repositoryId,
-        result = getRequest(baseUrl, language, getBaseURL(baseUrl) & "repos/" & repoID & "/search?range-start=0&query=%7Bfilters%3A%5B%7B%22className%22%3A%22" & objectName & "%22%7D%5D%7D&range-end=-1&")
+        // The query object travels inside RelativePath, which Web.Contents passes
+        // on unchanged, so it has to arrive percent-encoded.
+        query = "{""filters"":[{""className"":""" & objectName & """}],""scope"":" & SearchScopeJson(searchScope) & "}",
+        result = getRequest(baseUrl, language, getBaseURL(baseUrl) & "repos/" & repoID & "/search?range-start=0&range-end=-1&query=" & Uri.EscapeDataString(query))
     in
         result;
 
-searchObjectAttributes = (baseUrl as text, language as text, objectName as text, attributes as list, relationDirection as text, optional repositoryId as text) =>
+searchObjectAttributes = (baseUrl as text, language as text, objectName as text, attributes as list, relationDirection as text, optional repositoryId as text, optional searchScope as text) =>
     let
         repoID = if repositoryId = null then getRepoID(baseUrl, language, 1) else repositoryId,
-        result = searchObjectWithJob(baseUrl, language, objectName, attributes, relationDirection, repoID)
+        result = searchObjectWithJob(baseUrl, language, objectName, attributes, relationDirection, repoID, searchScope)
     in
         result;
 
@@ -1009,14 +1329,28 @@ ProcessSearchItems = (items as list, langIndependentAttributes as list, langDepe
         includeType = getterType = "WITH_TYPE" or getterType = "WITH_TYPE_NAME_DELIMITER",
         useTargetNames = getterType = "WITH_NAME" or getterType = "WITH_NAME_DELIMITER" or getterType = "WITH_TYPE_NAME_DELIMITER",
         combineWithDelimiter = getterType = "WITH_NAME_DELIMITER" or getterType = "WITH_TYPE_NAME_DELIMITER",
+        // Modelling instances report the model they sit in. Those two fields
+        // become columns of their own, but only when the result actually carries
+        // them, so a pure repository search keeps the shape it always had.
+        hasModelContext = List.AnyTrue(
+            List.Transform(
+                items,
+                each
+                    Value.Is(_, type record) and
+                    (Record.FieldOrDefault(_, "modelId", null) <> null or
+                     Record.FieldOrDefault(_, "modelName", null) <> null)
+            )
+        ),
         EmptyResult = if includeType then #table({"ID", "Type"}, {}) else #table({"ID"}, {}),
         // Supplying Column1 explicitly keeps the transformation valid when the
         // search returns an empty list.
         #"In Tabelle konvertiert" = Table.FromList(items, Splitter.SplitByNothing(), {"Column1"}, null, ExtraValues.Error),
-        #"Erweiterte Column1" = Table.ExpandRecordColumn(#"In Tabelle konvertiert", "Column1", {"rest_links", "id", "name", "type", "artefactType", "metaName", "link", "icon", "attributes"}, {"Column1.rest_links", "Column1.id", "Column1.name", "Column1.type", "Column1.artefactType", "Column1.metaName", "Column1.link", "Column1.icon", "Column1.attributes"}),
-        DefaultRemoveColumns = Table.RemoveColumns(#"Erweiterte Column1",{"Column1.type", "Column1.artefactType", "Column1.metaName", "Column1.link", "Column1.icon"}),
-        WithTypeRemoveColumns = Table.RemoveColumns(#"Erweiterte Column1",{"Column1.artefactType", "Column1.metaName", "Column1.link", "Column1.icon"}),
-        #"Entfernte Spalten" = if includeType then WithTypeRemoveColumns else DefaultRemoveColumns,
+        #"Erweiterte Column1" = Table.ExpandRecordColumn(#"In Tabelle konvertiert", "Column1", {"rest_links", "id", "name", "type", "artefactType", "metaName", "link", "icon", "modelId", "modelName", "attributes"}, {"Column1.rest_links", "Column1.id", "Column1.name", "Column1.type", "Column1.artefactType", "Column1.metaName", "Column1.link", "Column1.icon", "Column1.modelId", "Column1.modelName", "Column1.attributes"}),
+        DroppedColumns =
+            {"Column1.artefactType", "Column1.metaName", "Column1.link", "Column1.icon"} &
+            (if includeType then {} else {"Column1.type"}) &
+            (if hasModelContext then {} else {"Column1.modelId", "Column1.modelName"}),
+        #"Entfernte Spalten" = Table.RemoveColumns(#"Erweiterte Column1", DroppedColumns),
         #"Erweiterte Column1.attributes" = Table.ExpandListColumn(#"Entfernte Spalten", "Column1.attributes"),
         #"Entfernte Spalten1" = Table.RemoveColumns(#"Erweiterte Column1.attributes",{"Column1.rest_links"}),
         FilteredRows = Table.SelectRows(#"Entfernte Spalten1", each 
@@ -1037,18 +1371,34 @@ ProcessSearchItems = (items as list, langIndependentAttributes as list, langDepe
         #"Removed Errors" = Table.RemoveRowsWithErrors(#"Entfernte Spalten2", {"Attributwert"}),
         #"Umbenannte Spalten" = Table.RenameColumns(#"Removed Errors",{{"Column1.attributes.name", "Attribut"}, {"Column1.attributes.attrType", "Attributtyp"}, {"Column1.name", "Prozess"}}),
         // The grouping keys also determine the column order of the result, so
-        // keep ID first and put Type directly behind it.
-        #"Gruppierte Zeilen" = if includeType then Table.Group(#"Umbenannte Spalten", {"Column1.id", "Column1.type", "Prozess", "Attribut"},{{"Anzahl", each Text.Combine([Attributwert], " ;] "), type text}}) else Table.Group(#"Umbenannte Spalten", {"Column1.id", "Prozess", "Attribut"}, {{"Anzahl", each Text.Combine([Attributwert], " ;] "), type text}}),
+        // keep ID first and put Type and the model context directly behind it.
+        ModelContextColumns = if hasModelContext then {"Column1.modelId", "Column1.modelName"} else {},
+        GroupKeys =
+            {"Column1.id"} &
+            (if includeType then {"Column1.type"} else {}) &
+            ModelContextColumns &
+            {"Prozess", "Attribut"},
+        #"Gruppierte Zeilen" = Table.Group(#"Umbenannte Spalten", GroupKeys, {{"Anzahl", each Text.Combine([Attributwert], " ;] "), type text}}),
         #"Pivotierte Spalte" = Table.Pivot(#"Gruppierte Zeilen", List.Distinct(#"Gruppierte Zeilen"[Attribut]), "Attribut", "Anzahl", each Text.Split(Text.Combine(_), " ;] ")),
-        #"Removed Columns" = if Table.HasColumns(#"Pivotierte Spalte", {"ID"}) then Table.RemoveColumns(#"Pivotierte Spalte",{"Prozess", "ID"}) else Table.RemoveColumns(#"Pivotierte Spalte",{"Prozess"}),
-        DefaultRenameColumns = Table.RenameColumns(#"Removed Columns",{{"Column1.id", "ID"}}),
-        WithTypeRenameColumns = Table.RenameColumns(#"Removed Columns",{{"Column1.id", "ID"},{"Column1.type", "Type"}}),
-        #"Renamed Columns" = if includeType then WithTypeRenameColumns else DefaultRenameColumns,
+        // A pivoted attribute can carry the same display name as one of the
+        // identity columns. Drop it rather than let the rename collide.
+        IdentityColumnNames =
+            {"ID"} &
+            (if includeType then {"Type"} else {}) &
+            (if hasModelContext then {"Model ID", "Model Name"} else {}),
+        CollidingColumns = List.Intersect({Table.ColumnNames(#"Pivotierte Spalte"), IdentityColumnNames}),
+        #"Removed Columns" = Table.RemoveColumns(#"Pivotierte Spalte", {"Prozess"} & CollidingColumns),
+        IdentityRenames =
+            {{"Column1.id", "ID"}} &
+            (if includeType then {{"Column1.type", "Type"}} else {}) &
+            (if hasModelContext then {{"Column1.modelId", "Model ID"}, {"Column1.modelName", "Model Name"}} else {}),
+        #"Renamed Columns" = Table.RenameColumns(#"Removed Columns", IdentityRenames),
         Selector = if List.Count(langDependentAttributes) = 0 then #"Renamed Columns" else Table.SelectColumns(#"Renamed Columns", List.Combine({{"ID"}, langDependentAttributes})),
         CustomDelimiter = if delimiter = null then ";" else delimiter,
         // The identity columns come first, so skip them and only combine or
-        // expand the attribute columns behind them.
-        FirstAttributeIndex = if includeType then 2 else 1,
+        // expand the attribute columns behind them. Counting them off the table
+        // keeps the offset right however many identity columns there are.
+        FirstAttributeIndex = List.Count(List.Intersect({Table.ColumnNames(Selector), IdentityColumnNames})),
         #"Expanding Columns" = if combineWithDelimiter then extractAllColumns(Selector, Table.ColumnNames(Selector), FirstAttributeIndex, CustomDelimiter) else expandAllColumns(Selector, Table.ColumnNames(Selector), FirstAttributeIndex),
         #"Removed Duplicates" = Table.Distinct(#"Expanding Columns"),
         // Lead with the identity columns and the object name. Everything the
@@ -1056,17 +1406,17 @@ ProcessSearchItems = (items as list, langIndependentAttributes as list, langDepe
         // in, and columns that are absent are simply skipped.
         #"Ordered Columns" = Table.ReorderColumns(
             #"Removed Duplicates",
-            List.Distinct({"ID", "Type", "Name"} & Table.ColumnNames(#"Removed Duplicates")),
+            List.Distinct({"ID", "Type", "Name", "Model ID", "Model Name"} & Table.ColumnNames(#"Removed Duplicates")),
             MissingField.Ignore
         ),
         Result = if List.IsEmpty(items) then EmptyResult else #"Ordered Columns"
     in
         Result;
 
-_getObject = (baseUrl as text, language as text, objectName as text, langIndependentAttributes as list, langDependentAttributes as list, getterType as text, optional delimiter as text, optional relationDirection as text, optional repositoryId as text) =>
+_getObject = (baseUrl as text, language as text, objectName as text, langIndependentAttributes as list, langDependentAttributes as list, getterType as text, optional delimiter as text, optional relationDirection as text, optional repositoryId as text, optional searchScope as text) =>
     let
         relationDirectionWithDefault = if relationDirection = null then "BOTH" else relationDirection,
-        Quelle = if List.Count(langIndependentAttributes) = 0 then searchObject(baseUrl, language, objectName, repositoryId) else searchObjectAttributes(baseUrl, language, objectName, langIndependentAttributes, relationDirectionWithDefault, repositoryId),
+        Quelle = if List.Count(langIndependentAttributes) = 0 then searchObject(baseUrl, language, objectName, repositoryId, searchScope) else searchObjectAttributes(baseUrl, language, objectName, langIndependentAttributes, relationDirectionWithDefault, repositoryId, searchScope),
         rawItemsValue = Record.FieldOrDefault(Quelle, "items", {}),
         rawItems = if Value.Is(rawItemsValue, type list) then rawItemsValue else {},
         items = List.Transform(
@@ -1087,6 +1437,10 @@ getObjectWithName = (baseUrl as text, language as text, objectName as text, lang
 getObjectWithNameDelimiter = (baseUrl as text, language as text, objectName as text, langIndependentAttributes as list, langDependentAttributes as list, delimiter, optional repositoryId as text) =>
     _getObject(baseUrl, language, objectName, langIndependentAttributes, langDependentAttributes, "WITH_NAME_DELIMITER", delimiter, null, repositoryId);
 
+// The same shaping as the class loader, searched in the model scope.
+getModelWithNameDelimiter = (baseUrl as text, language as text, modelTypeName as text, langIndependentAttributes as list, langDependentAttributes as list, delimiter, optional repositoryId as text) =>
+    _getObject(baseUrl, language, modelTypeName, langIndependentAttributes, langDependentAttributes, "WITH_NAME_DELIMITER", delimiter, null, repositoryId, search_scope_models);
+
 getObjectWithType = (baseUrl as text, language as text, objectName as text, langIndependentAttributes as list, langDependentAttributes as list, optional repositoryId as text) =>
     _getObject(baseUrl, language, objectName, langIndependentAttributes, langDependentAttributes, "WITH_TYPE", null, null, repositoryId);
 
@@ -1104,7 +1458,8 @@ _getRelationTable = (baseUrl as text, language as text, objectA as text, relatio
         ClassB = getObjectWithType(baseUrl, language, objectB, {"NAME"}, {}, repositoryId),
         ClassAName = if not Table.IsEmpty(ClassA) and Table.HasColumns(ClassA, "Type") then Text.From(Table.First(ClassA)[Type]) else objectA,
         ClassBName = if not Table.IsEmpty(ClassB) and Table.HasColumns(ClassB, "Type") then Text.From(Table.First(ClassB)[Type]) else objectB,
-        RelationColumns = List.RemoveItems(Table.ColumnNames(ClassA), {"Type", "ID"}),
+        // The model context columns are identity, not the relation payload.
+        RelationColumns = List.RemoveItems(Table.ColumnNames(ClassA), {"Type", "ID", "Model ID", "Model Name"}),
         RelationColumnName = List.First(RelationColumns, null),
         OutputColumnNames = if relationDirection = "INCOMING" then
                                 {"To: " & ClassAName, "From: " & ClassBName}
@@ -1120,7 +1475,7 @@ _getRelationTable = (baseUrl as text, language as text, objectA as text, relatio
                          RenamedRelation = Table.RenameColumns(ClassA, {{RelationColumnName, "RELATION"}}),
                          FilterList = List.Buffer(Table.Column(ClassB, "ID")),
                          FilteredRows = Table.SelectRows(RenamedRelation, each List.Contains(FilterList, [RELATION])),
-                         RemovedType = Table.RemoveColumns(FilteredRows, {"Type"}),
+                         RemovedType = Table.RemoveColumns(FilteredRows, {"Type", "Model ID", "Model Name"}, MissingField.Ignore),
                          RenamedResult = Table.RenameColumns(RemovedType, {{"ID", OutputColumnNames{0}}, {"RELATION", OutputColumnNames{1}}})
                      in
                          RenamedResult
@@ -1475,7 +1830,7 @@ BOCADONISADOITConnector.Icons = [
 searchRequestStepSize = 1000;
 
 // Create a search job 
-createSearchJob = (baseUrl as text, language as text, objectName as text, attributes as list, relationDirection as text, optional repositoryId as text) =>
+createSearchJob = (baseUrl as text, language as text, objectName as text, attributes as list, relationDirection as text, optional repositoryId as text, optional searchScope as text) =>
     let
         repoID = if repositoryId = null then getRepoID(baseUrl, language, 1) else repositoryId,
         
@@ -1501,7 +1856,7 @@ createSearchJob = (baseUrl as text, language as text, objectName as text, attrib
         requestBody = "{""filters"":" & Text.FromBinary(Json.FromValue(filtersList)) & 
                      ",""attributes"":[" & attributesJson & "]" & 
                      ",""relations"":[" & attributesJson & "]" & 
-                     ",""scope"":{""repoObjects"":true,""modObjects"":true}}",
+                     ",""scope"":" & SearchScopeJson(searchScope) & "}",
         
         // Make the request to create the search job
         response = Web.Contents(baseUrl, [
@@ -1532,12 +1887,12 @@ Function.WaitFor = (seconds as number) as logical =>
         delay;
 
 // Search for objects using a search job
-searchObjectWithJob = (baseUrl as text, language as text, objectName as text, attributes as list, relationDirection as text, optional repositoryId as text) =>
+searchObjectWithJob = (baseUrl as text, language as text, objectName as text, attributes as list, relationDirection as text, optional repositoryId as text, optional searchScope as text) =>
     let
         repoID = if repositoryId = null then getRepoID(baseUrl, language, 1) else repositoryId,
         
         // Create the search job
-        key = createSearchJob(baseUrl, language, objectName, attributes, relationDirection, repoID),
+        key = createSearchJob(baseUrl, language, objectName, attributes, relationDirection, repoID, searchScope),
         
         // Add a 5-second delay
         waitResult = Function.WaitFor(5),
