@@ -1501,7 +1501,7 @@ createSearchJob = (baseUrl as text, language as text, objectName as text, attrib
         requestBody = "{""filters"":" & Text.FromBinary(Json.FromValue(filtersList)) & 
                      ",""attributes"":[" & attributesJson & "]" & 
                      ",""relations"":[" & attributesJson & "]" & 
-                     ",""scope"":{""repoObjects"":true}}",
+                     ",""scope"":{""repoObjects"":true,""modObjects"":true}}",
         
         // Make the request to create the search job
         response = Web.Contents(baseUrl, [
