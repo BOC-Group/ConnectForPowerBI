@@ -728,8 +728,8 @@ GetEndUserRelationFunction = (baseUrl as text, language as text) as function =>
             ]),
             optional direction as (type text meta [
                 Documentation.FieldCaption = "Direction",
-                Documentation.FieldDescription = "Which way the relation is followed, from the source class to the target class. OUTGOING keeps relations that point from the source to the target, INCOMING keeps those pointing back, and BOTH applies no direction filter. Leave empty to use BOTH.",
-                Documentation.AllowedValues = {"BOTH", "INCOMING", "OUTGOING"}
+                Documentation.FieldDescription = "Which way the relation is followed, from the source class to the target class. OUTGOING keeps relations that point from the source to the target, INCOMING keeps those pointing back, and BOTH applies no direction filter. Leave empty to use OUTGOING.",
+                Documentation.AllowedValues = {"OUTGOING", "INCOMING", "BOTH"}
             ]),
             optional repositoryId as (type text meta [
                 Documentation.FieldCaption = "Repository ID",
@@ -955,7 +955,7 @@ ExecuteSavedSearchPaged = (
                 )
             in
                 response,
-        firstPage = getPage(0, searchRequestStepSize - 1),
+        firstPage = getPage(0, searchRequestStepSize),
         firstItemsValue = Record.FieldOrDefault(firstPage, "items", {}),
         firstItems = if Value.Is(firstItemsValue, type list) then firstItemsValue else {},
         reportedTotal = try Number.From(Record.FieldOrDefault(firstPage, "hitsTotal", null)) otherwise null,
@@ -976,7 +976,7 @@ ExecuteSavedSearchPaged = (
             remainingPageStarts,
             each
                 let
-                    pageEnd = List.Min({_ + searchRequestStepSize - 1, totalAmount - 1}),
+                    pageEnd = List.Min({_ + searchRequestStepSize, totalAmount}),
                     page = getPage(_, pageEnd),
                     pageItemsValue = Record.FieldOrDefault(page, "items", {})
                 in
@@ -1048,11 +1048,12 @@ GetCustomClassFunction = (baseUrl as text, language as text) =>
         in
             result;
 
-// Function to build a custom relation
+// Function to build a custom relation. An unset direction means OUTGOING (the
+// source-to-target reading), not an unfiltered BOTH.
 GetCustomRelationFunction = (baseUrl as text, language as text) =>
     (sourceClass as text, relationName as text, targetClass as text, optional direction as text, optional repositoryId as text) =>
         let
-            dir = if direction = null then "BOTH" else direction,
+            dir = if direction = null then "OUTGOING" else direction,
             result = if dir = "INCOMING" then 
                         getRelationTableIncoming(baseUrl, language, sourceClass, relationName, targetClass, repositoryId)
                      else if dir = "OUTGOING" then
@@ -1876,67 +1877,60 @@ createSearchJob = (baseUrl as text, language as text, objectName as text, attrib
     in
         searchJobKey;
 
-// Function to create a delay in seconds
-Function.WaitFor = (seconds as number) as logical =>
-    let
-        delay = Function.InvokeAfter(
-            () => true,
-            #duration(0, 0, 0, seconds)
-        )
-    in
-        delay;
-
 // Search for objects using a search job
 searchObjectWithJob = (baseUrl as text, language as text, objectName as text, attributes as list, relationDirection as text, optional repositoryId as text, optional searchScope as text) =>
     let
         repoID = if repositoryId = null then getRepoID(baseUrl, language, 1) else repositoryId,
         
-        // Create the search job
+        // Create the search job. Its key travels in the page URL below, so the
+        // POST is forced before any read of the results — no explicit wait is
+        // needed to order the two.
         key = createSearchJob(baseUrl, language, objectName, attributes, relationDirection, repoID, searchScope),
         
-        // Add a 5-second delay
-        waitResult = Function.WaitFor(5),
-        
-        // First request to get the total number of hits
-        responseForTotal = if waitResult then
-                               Json.Document(Web.Contents(baseUrl, [
-                                   Headers = [#"Accept-Language" = language],
-                                   RelativePath = "rest/4.0/repos/" & repoID & "/search/jobs/" & key,
-                                   Query = [#"range-start" = "0", #"range-end" = "1"]
-                               ]))
-                           else
-                               error "Search job wait failed.",
-        
-        totalAmount = responseForTotal[hitsTotal],
-        
-        // Generate ranges for paged requests
-        generateRanges = (total, step) => 
+        // The first page carries hitsTotal, so it doubles as the count probe
+        // that used to cost a separate round trip of its own.
+        //
+        // range-end is exclusive: a page that should return one hit asks for
+        // range-start 0 and range-end 1, and the last page stops at the total
+        // rather than at total - 1. Treating it as inclusive dropped the final
+        // hit of every page, so a single-hit search returned nothing and every
+        // page boundary lost one object.
+        getPage = (rangeStart as number, rangeEnd as number) as record =>
+            Json.Document(Web.Contents(baseUrl, [
+                Headers = [#"Accept-Language" = language],
+                RelativePath = "rest/4.0/repos/" & repoID & "/search/jobs/" & key,
+                Query = [#"range-start" = Text.From(rangeStart), #"range-end" = Text.From(rangeEnd)]
+            ])),
+
+        // An empty result set need not carry an items field at all, and the
+        // first page is now read even when there are no hits.
+        getPageItems = (page as record) as list =>
             let
-                indexList = List.Numbers(0, Number.RoundUp(total / step), step),
-                ranges = List.Transform(indexList, each {_, if _ + step < total then _ + step - 1 else total - 1})
+                itemsValue = Record.FieldOrDefault(page, "items", {})
             in
-                ranges,
-                
-        ranges = generateRanges(totalAmount, searchRequestStepSize),
-        
-        // Function to retrieve each page of results
-        getResultPage = (range) => 
-            let
-                start = range{0},
-                end = range{1},
-                response = Json.Document(Web.Contents(baseUrl, [
-                    Headers = [#"Accept-Language" = language],
-                    RelativePath = "rest/4.0/repos/" & repoID & "/search/jobs/" & key,
-                    Query = [#"range-start" = Text.From(start), #"range-end" = Text.From(end)]
-                ])),
-                items = response[items]
-            in
-                items,
-                
-        // Get all results by combining the results from each page
-        results = List.Transform(ranges, each getResultPage(_)),
-        allItems = List.Combine(results),
-        
+                if Value.Is(itemsValue, type list) then itemsValue else {},
+
+        firstPage = getPage(0, searchRequestStepSize),
+
+        totalAmount = firstPage[hitsTotal],
+
+        // Only the pages after the first one still have to be fetched.
+        remainingPageCount =
+            if totalAmount <= searchRequestStepSize
+            then 0
+            else Number.RoundUp((totalAmount - searchRequestStepSize) / searchRequestStepSize),
+        remainingPageStarts = List.Numbers(
+            searchRequestStepSize,
+            remainingPageCount,
+            searchRequestStepSize
+        ),
+        remainingPages = List.Transform(
+            remainingPageStarts,
+            each getPageItems(getPage(_, List.Min({_ + searchRequestStepSize, totalAmount})))
+        ),
+
+        allItems = List.Combine({getPageItems(firstPage)} & remainingPages),
+
         // Create a record that looks like the original searchObject response
         response = [items = allItems]
     in
