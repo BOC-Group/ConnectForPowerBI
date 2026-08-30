@@ -1354,13 +1354,20 @@ ProcessSearchItems = (items as list, langIndependentAttributes as list, langDepe
         #"Entfernte Spalten" = Table.RemoveColumns(#"Erweiterte Column1", DroppedColumns),
         #"Erweiterte Column1.attributes" = Table.ExpandListColumn(#"Entfernte Spalten", "Column1.attributes"),
         #"Entfernte Spalten1" = Table.RemoveColumns(#"Erweiterte Column1.attributes",{"Column1.rest_links"}),
+        // A hit can come back carrying no attributes and no relations at all —
+        // an object of the searched class that simply does not have the
+        // requested relation. Merging two empty lists leaves an empty list, and
+        // expanding that leaves a null cell rather than a record, so reading a
+        // field off it failed the whole query with "We cannot convert the value
+        // null to type Record". Such a row holds nothing to shape, so drop it.
         FilteredRows = Table.SelectRows(#"Entfernte Spalten1", each 
             let
                 attributes = [Column1.attributes],
-                metaNameExists = Record.Field(attributes, "metaName") = "NAME",
+                hasAttributes = Value.Is(attributes, type record),
+                metaNameExists = hasAttributes and Record.FieldOrDefault(attributes, "metaName", null) = "NAME",
                 nameInlangIndependentAttributes = List.Contains(langIndependentAttributes, "NAME")
             in
-                not (metaNameExists and not nameInlangIndependentAttributes)
+                hasAttributes and not (metaNameExists and not nameInlangIndependentAttributes)
         ),
         #"Erweiterte Column1.attributes1" = Table.ExpandRecordColumn(FilteredRows, "Column1.attributes", {"name", "attrType", "value", "targets"}, {"Column1.attributes.name", "Column1.attributes.attrType", "Column1.attributes.value", "Column1.attributes.targets"}),
         #"Erweiterte Column1.attributes.targets" = Table.ExpandListColumn(#"Erweiterte Column1.attributes1", "Column1.attributes.targets"),
